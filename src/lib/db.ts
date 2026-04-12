@@ -56,4 +56,9 @@ function initSchema(db: Database.Database) {
     );
   `);
 
+  // Add mrr_rental_ids column for multi-rig orders (JSON-encoded array of rental IDs)
+  const cols = db.prepare('PRAGMA table_info(orders)').all() as { name: string }[];
+  if (!cols.find(c => c.name === 'mrr_rental_ids')) {
+    db.exec('ALTER TABLE orders ADD COLUMN mrr_rental_ids TEXT');
+  }
 }

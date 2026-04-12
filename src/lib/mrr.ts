@@ -83,6 +83,16 @@ export interface RentalResult {
   end: string;
 }
 
+/** Result when provisioning one or more rigs to fulfil a hashrate order. */
+export interface MultiRigRentalResult {
+  /** All individual rentals that together fulfil the order. */
+  rentals: RentalResult[];
+  /** Combined advertised hashrate across all rented rigs. */
+  totalHashrate: number;
+  /** Hashrate unit (e.g. "TH/s"). */
+  unit: string;
+}
+
 /** Rent a rig for the specified duration. */
 export async function rentRig(
   rigId: number,
@@ -117,10 +127,75 @@ export async function getRentalStatus(rentalId: string) {
 }
 
 /**
- * Auto-provision a miner for an order using the real MRR API:
- * 1. Find available rigs matching the algorithm on Mining Rig Rentals
- * 2. Pick the best-priced rig that satisfies the hashrate requirement
- * 3. Rent it via MRR API v2
+ * Select the cheapest set of available rigs that collectively meet the required hashrate.
+ *
+ * Strategy:
+ * 1. If a single rig is available whose hashrate is within ±5 % of `requiredHashrate`,
+ *    return that rig (lowest cost first).
+ * 2. Otherwise aggregate the most cost-efficient rigs (lowest BTC per hash) until the
+ *    combined hashrate reaches at least `requiredHashrate * 0.95` (±5 % lower bound).
+ *
+ * Returns `null` when the available rigs cannot collectively satisfy the requirement.
+ */
+export function selectRigsForHashrate(
+  rigs: MrrRig[],
+  requiredHashrate: number,
+  unit: string,
+): MrrRig[] | null {
+  const unitNorm = unit.toLowerCase().replace('/', '');
+
+  // Filter rigs by unit and valid price
+  const eligible = rigs.filter(rig => {
+    const h = rig.hashrate?.advertised;
+    if (!h) return false;
+    const rigUnit = (h.type ?? '').toLowerCase().replace('/', '');
+    const price = rig.price?.BTC?.price;
+    return rigUnit === unitNorm && typeof price === 'number' && price > 0;
+  });
+
+  if (!eligible.length) return null;
+
+  const lowerBound = requiredHashrate * 0.95;
+  const upperBound = requiredHashrate * 1.05;
+
+  // --- Step 1: look for a single rig within ±5 % ---
+  const singleCandidates = eligible.filter(r => {
+    const h = r.hashrate.advertised.hash;
+    return h >= lowerBound && h <= upperBound;
+  });
+
+  if (singleCandidates.length) {
+    // Cheapest by total price
+    singleCandidates.sort((a, b) => a.price.BTC.price - b.price.BTC.price);
+    return [singleCandidates[0]];
+  }
+
+  // --- Step 2: aggregate cheapest rigs by cost-per-hash efficiency ---
+  // Sort by ascending cost-per-hash (BTC / hash)
+  const byEfficiency = [...eligible].sort(
+    (a, b) =>
+      a.price.BTC.price / a.hashrate.advertised.hash -
+      b.price.BTC.price / b.hashrate.advertised.hash,
+  );
+
+  const selected: MrrRig[] = [];
+  let accumulated = 0;
+
+  for (const rig of byEfficiency) {
+    selected.push(rig);
+    accumulated += rig.hashrate.advertised.hash;
+    if (accumulated >= lowerBound) break;
+  }
+
+  return accumulated >= lowerBound ? selected : null;
+}
+
+/**
+ * Auto-provision one or more miners for an order using the real MRR API:
+ * 1. Find available rigs matching the algorithm on Mining Rig Rentals.
+ * 2. If a single rig is within ±5 % of the required hashrate, rent it.
+ * 3. Otherwise aggregate the most cost-efficient rigs until the total hashrate
+ *    meets the requirement (within ±5 % lower bound) and rent all of them.
  *
  * Requires MRR_API_KEY and MRR_API_SECRET to be set.
  */
@@ -130,30 +205,23 @@ export async function provisionMiner(
   unit: string,
   durationHours: number,
   workerName: string,
-): Promise<RentalResult | null> {
+): Promise<MultiRigRentalResult | null> {
   const rigs = await getAvailableRigs(algorithm);
   if (!rigs.length) return null;
 
-  // Find rigs that can deliver the required hashrate
-  const unitNormalized = unit.toLowerCase();
-  const suitable = rigs.filter(rig => {
-    const h = rig.hashrate?.advertised;
-    if (!h) return false;
-    const rigUnit = (h.type ?? '').toLowerCase().replace('/', '');
-    const reqUnit = unitNormalized.replace('/', '');
-    return rigUnit === reqUnit && h.hash >= requiredHashrate;
-  });
+  const chosenRigs = selectRigsForHashrate(rigs, requiredHashrate, unit);
+  if (!chosenRigs) return null;
 
-  // Return null when no rigs satisfy the hashrate/unit requirement
-  if (!suitable.length) return null;
+  // Rent all selected rigs (sequentially to avoid nonce collisions with MRR API)
+  const rentals: RentalResult[] = [];
+  for (const rig of chosenRigs) {
+    const rental = await rentRig(rig.id, durationHours, workerName);
+    rentals.push(rental);
+  }
 
-  // Return null when no rigs have a valid positive price
-  const priced = suitable.filter(r => typeof r.price?.BTC?.price === 'number' && r.price.BTC.price > 0);
-  if (!priced.length) return null;
-  priced.sort((a, b) => a.price.BTC.price - b.price.BTC.price);
-  const rig = priced[0];
+  const totalHashrate = chosenRigs.reduce((sum, r) => sum + r.hashrate.advertised.hash, 0);
 
-  return rentRig(rig.id, durationHours, workerName);
+  return { rentals, totalHashrate, unit };
 }
 
 /** Check whether MRR API credentials are configured. */

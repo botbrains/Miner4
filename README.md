@@ -73,6 +73,7 @@ MRR_API_SECRET=         # Mining Rig Rentals API secret
 NOWPAYMENTS_API_KEY=    # NOWPayments API key
 NOWPAYMENTS_IPN_SECRET= # NOWPayments IPN secret for webhook verification
 NEXT_PUBLIC_BASE_URL=   # Your production URL (for webhook callbacks)
+                        # Also accepted as BASE_URL for server-side-only use
 ```
 
 > **Demo mode**: The app works without API keys — payments and miner provisioning are simulated for development.

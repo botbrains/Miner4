@@ -50,11 +50,11 @@ export async function POST(req: Request) {
       UPDATE orders SET payment_status = ?, updated_at = datetime('now') WHERE id = ?
     `).run(payment_status, order_id);
 
-    // Provision miner when payment is confirmed
+    // Provision miner(s) when payment is confirmed
     const confirmedStatuses = ['confirmed', 'finished'];
     if (confirmedStatuses.includes(payment_status) && order.status === 'awaiting_payment') {
       try {
-        const rental = await provisionMiner(
+        const result = await provisionMiner(
           order.algorithm,
           order.hashrate,
           order.unit,
@@ -62,16 +62,27 @@ export async function POST(req: Request) {
           order.worker_name,
         );
 
-        if (rental) {
-          const expiresAt = rental.end ?? new Date(Date.now() + order.duration_hours * 3600_000).toISOString();
+        if (result && result.rentals.length > 0) {
+          // Use the earliest end time among all rentals as the order expiry
+          const ends = result.rentals.map(r => r.end).filter(Boolean);
+          const expiresAt = ends.length
+            ? ends.reduce((min, e) => (e < min ? e : min))
+            : new Date(Date.now() + order.duration_hours * 3600_000).toISOString();
+
+          // Primary rental ID (first rig, for backward compatibility)
+          const primaryRentalId = result.rentals[0].rentalId;
+          // JSON-encoded array of all rental IDs (multi-rig support)
+          const allRentalIds = JSON.stringify(result.rentals.map(r => r.rentalId));
+
           db.prepare(`
             UPDATE orders
-            SET status        = 'active',
-                mrr_rental_id = ?,
-                expires_at    = ?,
-                updated_at    = datetime('now')
+            SET status          = 'active',
+                mrr_rental_id   = ?,
+                mrr_rental_ids  = ?,
+                expires_at      = ?,
+                updated_at      = datetime('now')
             WHERE id = ?
-          `).run(rental.rentalId, expiresAt, order_id);
+          `).run(primaryRentalId, allRentalIds, expiresAt, order_id);
         } else {
           db.prepare(`
             UPDATE orders SET status = 'provisioning_failed', updated_at = datetime('now') WHERE id = ?

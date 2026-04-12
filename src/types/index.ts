@@ -28,6 +28,7 @@ export interface Order {
   payment_status: string;
   status: string;
   mrr_rental_id: string | null;
+  mrr_rental_ids: string | null;
   expires_at: string | null;
   created_at: string;
   updated_at: string;

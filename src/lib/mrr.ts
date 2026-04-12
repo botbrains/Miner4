@@ -2,7 +2,7 @@
  * Mining Rig Rentals API v2 service.
  * Docs: https://www.miningrigrentals.com/apidoc/v2
  *
- * Set environment variables:
+ * Required environment variables:
  *   MRR_API_KEY    – your MRR API key
  *   MRR_API_SECRET – your MRR API secret
  */
@@ -10,7 +10,15 @@
 import crypto from 'crypto';
 
 const MRR_BASE = 'https://www.miningrigrentals.com/api/v2';
-const MS_PER_HOUR = 3_600_000;
+
+/** Throw a clear error when API credentials are not set. */
+function requireKeys() {
+  if (!process.env.MRR_API_KEY || !process.env.MRR_API_SECRET) {
+    throw new Error(
+      'MRR API keys are not configured. Set MRR_API_KEY and MRR_API_SECRET in your .env.local file.',
+    );
+  }
+}
 
 function buildHeaders(endpoint: string, body: string = '') {
   const key    = process.env.MRR_API_KEY    ?? '';
@@ -32,6 +40,8 @@ async function mrrRequest<T>(
   path: string,
   data?: unknown,
 ): Promise<T> {
+  requireKeys();
+
   const url      = `${MRR_BASE}${path}`;
   const bodyStr  = data ? JSON.stringify(data) : '';
   const headers  = buildHeaders(path, bodyStr);
@@ -107,10 +117,12 @@ export async function getRentalStatus(rentalId: string) {
 }
 
 /**
- * Auto-provision a miner for an order:
- * 1. Find available rigs matching the algorithm
+ * Auto-provision a miner for an order using the real MRR API:
+ * 1. Find available rigs matching the algorithm on Mining Rig Rentals
  * 2. Pick the best-priced rig that satisfies the hashrate requirement
- * 3. Rent it
+ * 3. Rent it via MRR API v2
+ *
+ * Requires MRR_API_KEY and MRR_API_SECRET to be set.
  */
 export async function provisionMiner(
   algorithm: string,
@@ -119,16 +131,6 @@ export async function provisionMiner(
   durationHours: number,
   workerName: string,
 ): Promise<RentalResult | null> {
-  // If no API keys configured, return a simulated result for demo purposes
-  if (!process.env.MRR_API_KEY || !process.env.MRR_API_SECRET) {
-    return {
-      rentalId: `demo-${Date.now()}`,
-      rigId: 0,
-      start: new Date().toISOString(),
-      end: new Date(Date.now() + durationHours * MS_PER_HOUR).toISOString(),
-    };
-  }
-
   const rigs = await getAvailableRigs(algorithm);
   if (!rigs.length) return null;
 
@@ -142,6 +144,7 @@ export async function provisionMiner(
     return rigUnit === reqUnit && h.hash >= requiredHashrate;
   });
 
+  // Fall back to all available rigs if none match exactly
   const candidates = suitable.length ? suitable : rigs;
 
   // Pick cheapest
@@ -150,3 +153,9 @@ export async function provisionMiner(
 
   return rentRig(rig.id, durationHours, workerName);
 }
+
+/** Check whether MRR API credentials are configured. */
+export function hasMrrKeys(): boolean {
+  return !!(process.env.MRR_API_KEY && process.env.MRR_API_SECRET);
+}
+

@@ -126,6 +126,11 @@ export async function getRentalStatus(rentalId: string) {
   return res.data;
 }
 
+/** Normalise a hashrate unit string for comparison (lower-case, strip '/'). */
+function normalizeUnit(unit: string): string {
+  return unit.toLowerCase().replace('/', '');
+}
+
 /**
  * Select the cheapest set of available rigs that collectively meet the required hashrate.
  *
@@ -142,13 +147,13 @@ export function selectRigsForHashrate(
   requiredHashrate: number,
   unit: string,
 ): MrrRig[] | null {
-  const unitNorm = unit.toLowerCase().replace('/', '');
+  const unitNorm = normalizeUnit(unit);
 
   // Filter rigs by unit and valid price
   const eligible = rigs.filter(rig => {
     const h = rig.hashrate?.advertised;
     if (!h) return false;
-    const rigUnit = (h.type ?? '').toLowerCase().replace('/', '');
+    const rigUnit = normalizeUnit(h.type ?? '');
     const price = rig.price?.BTC?.price;
     return rigUnit === unitNorm && typeof price === 'number' && price > 0;
   });
@@ -212,11 +217,23 @@ export async function provisionMiner(
   const chosenRigs = selectRigsForHashrate(rigs, requiredHashrate, unit);
   if (!chosenRigs) return null;
 
-  // Rent all selected rigs (sequentially to avoid nonce collisions with MRR API)
+  // Rent all selected rigs sequentially (avoids MRR API nonce collisions).
+  // If any rental fails the whole provisioning attempt is aborted; already-created
+  // rentals are logged so they can be cancelled manually if necessary.
   const rentals: RentalResult[] = [];
   for (const rig of chosenRigs) {
-    const rental = await rentRig(rig.id, durationHours, workerName);
-    rentals.push(rental);
+    try {
+      const rental = await rentRig(rig.id, durationHours, workerName);
+      rentals.push(rental);
+    } catch (err) {
+      if (rentals.length > 0) {
+        console.error(
+          '[provisionMiner] Partial failure – rigs already rented that may need manual cancellation:',
+          rentals.map(r => r.rentalId),
+        );
+      }
+      throw err;
+    }
   }
 
   const totalHashrate = chosenRigs.reduce((sum, r) => sum + r.hashrate.advertised.hash, 0);

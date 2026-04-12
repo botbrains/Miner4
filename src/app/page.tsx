@@ -1,22 +1,15 @@
 import Link from 'next/link';
-import { getDb } from '@/lib/db';
-import PackageCard from '@/components/PackageCard';
-import type { Package } from '@/types';
+import { ALGORITHM_COLORS } from '@/types';
 
-export const dynamic = 'force-dynamic';
+const ALGORITHMS = [
+  { id: 'SHA-256',  coin: 'Bitcoin',   symbol: '₿', unit: 'TH/s', desc: 'Mine BTC with industrial ASIC power' },
+  { id: 'Ethash',   coin: 'Ethereum',  symbol: 'Ξ', unit: 'MH/s', desc: 'Ethereum-compatible GPU hashrate'    },
+  { id: 'Scrypt',   coin: 'Litecoin',  symbol: 'Ł', unit: 'MH/s', desc: 'LTC & DOGE Scrypt mining rigs'      },
+  { id: 'X11',      coin: 'Dash',      symbol: 'D', unit: 'GH/s', desc: 'DASH X11 algorithm hashrate'        },
+  { id: 'RandomX',  coin: 'Monero',    symbol: 'ɱ', unit: 'KH/s', desc: 'Privacy-first XMR CPU mining'       },
+];
 
-async function getPopularPackages(): Promise<Package[]> {
-  try {
-    const db = getDb();
-    return db.prepare('SELECT * FROM packages WHERE popular = 1 ORDER BY price_usd ASC').all() as Package[];
-  } catch {
-    return [];
-  }
-}
-
-export default async function HomePage() {
-  const popular = await getPopularPackages();
-
+export default function HomePage() {
   return (
     <>
       {/* Hero */}
@@ -39,8 +32,8 @@ export default async function HomePage() {
             </span>
           </h1>
           <p className="text-xl text-gray-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-            No hardware. No contracts. Pay with crypto and start mining Bitcoin, Ethereum,
-            Litecoin and more — in minutes.
+            No hardware. No contracts. Choose your algorithm, set your hashrate and duration —
+            pricing calculated live from Mining Rig Rentals.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
@@ -48,7 +41,7 @@ export default async function HomePage() {
               href="/packages"
               className="px-8 py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold text-lg rounded-xl hover:from-orange-400 hover:to-yellow-400 transition-all shadow-2xl shadow-orange-500/25 hover:shadow-orange-500/40 hover:scale-105"
             >
-              Browse Packages →
+              Build Your Package →
             </Link>
             <a
               href="#how-it-works"
@@ -61,10 +54,10 @@ export default async function HomePage() {
           {/* Stats row */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-8 mt-16">
             {[
-              { value: '10+', label: 'Algorithms' },
-              { value: '100%', label: 'Crypto Payments' },
+              { value: '5',     label: 'Algorithms' },
+              { value: '100%',  label: 'Crypto Payments' },
               { value: '<5 min', label: 'Activation Time' },
-              { value: '24/7', label: 'Uptime' },
+              { value: '13%',   label: 'Fair Markup' },
             ].map(stat => (
               <div key={stat.label} className="text-center">
                 <div className="text-2xl font-black text-white">{stat.value}</div>
@@ -75,30 +68,52 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Popular packages preview */}
-      {popular.length > 0 && (
-        <section id="pricing" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl md:text-4xl font-black text-white mb-4">Popular Packages</h2>
-            <p className="text-gray-400">The most rented hashrate packages on our platform.</p>
-          </div>
+      {/* Algorithm cards */}
+      <section id="pricing" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl md:text-4xl font-black text-white mb-4">Supported Algorithms</h2>
+          <p className="text-gray-400">Pick an algorithm to start building your custom hashrate package.</p>
+        </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-            {popular.map(pkg => (
-              <PackageCard key={pkg.id} pkg={pkg} highlight={!!pkg.popular} />
-            ))}
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {ALGORITHMS.map(algo => {
+            const color = ALGORITHM_COLORS[algo.id] ?? 'text-gray-400 bg-gray-400/10';
+            return (
+              <Link
+                key={algo.id}
+                href={`/packages?algorithm=${encodeURIComponent(algo.id)}`}
+                className="group flex items-start gap-4 p-6 rounded-2xl border border-gray-800 bg-gray-900 hover:border-gray-700 hover:shadow-xl hover:shadow-black/40 hover:-translate-y-1 transition-all duration-200"
+              >
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 font-black text-2xl ${color}`}>
+                  {algo.symbol}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-white font-bold">{algo.id}</span>
+                    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${color}`}>{algo.unit}</span>
+                  </div>
+                  <p className="text-gray-400 text-sm font-medium">{algo.coin}</p>
+                  <p className="text-gray-500 text-xs mt-1">{algo.desc}</p>
+                </div>
+                <svg className="w-4 h-4 text-gray-600 group-hover:text-orange-400 ml-auto mt-1 flex-shrink-0 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </Link>
+            );
+          })}
 
-          <div className="text-center mt-10">
-            <Link
-              href="/packages"
-              className="inline-flex items-center gap-2 px-6 py-3 border border-gray-700 text-gray-300 font-semibold rounded-xl hover:border-orange-500/50 hover:text-orange-400 transition-all"
-            >
-              View All Packages →
-            </Link>
-          </div>
-        </section>
-      )}
+          {/* CTA card */}
+          <Link
+            href="/packages"
+            className="group flex items-center justify-center gap-3 p-6 rounded-2xl border-2 border-dashed border-gray-700 bg-gray-900/50 hover:border-orange-500/50 hover:bg-orange-500/5 transition-all duration-200 text-gray-500 hover:text-orange-400 font-semibold text-sm"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Build Custom Package
+          </Link>
+        </div>
+      </section>
 
       {/* How it works */}
       <section id="how-it-works" className="bg-gray-900/50 py-20 border-y border-gray-800">
@@ -112,8 +127,8 @@ export default async function HomePage() {
             {[
               {
                 step: '01',
-                title: 'Choose a Package',
-                desc: 'Browse our catalog of hashrate packages. Pick your algorithm, hashrate, and rental duration.',
+                title: 'Configure Your Package',
+                desc: 'Select an algorithm, set your desired hashrate and rental duration. Pricing is calculated live from Mining Rig Rentals at a 13% markup plus a $1.99 service fee.',
                 icon: (
                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -133,7 +148,7 @@ export default async function HomePage() {
               {
                 step: '03',
                 title: 'Start Mining',
-                desc: 'Once payment is confirmed, we automatically provision miners from Mining Rig Rentals and start mining to your wallet.',
+                desc: 'Once payment is confirmed, we automatically find the best-priced rig on Mining Rig Rentals and provision it for your exact hashrate and duration.',
                 icon: (
                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -192,6 +207,10 @@ export default async function HomePage() {
           <div className="space-y-4">
             {[
               {
+                q: 'How is pricing calculated?',
+                a: 'We fetch live pricing from Mining Rig Rentals for your chosen algorithm. Your cost is the minimum available market rate × your hashrate × duration days, plus a 13% marketplace markup and a flat $1.99 Miner4 service fee.',
+              },
+              {
                 q: 'How quickly does mining start?',
                 a: 'Once your cryptocurrency payment is confirmed on-chain, our system automatically provisions mining rigs through Mining Rig Rentals. Activation typically takes less than 5 minutes.',
               },
@@ -202,10 +221,6 @@ export default async function HomePage() {
               {
                 q: 'Do you accept fiat payments?',
                 a: 'No. We are a crypto-native platform and only accept cryptocurrency payments via NOWPayments. This allows for instant global settlements with no chargebacks.',
-              },
-              {
-                q: 'What happens if a miner goes offline?',
-                a: 'Mining Rig Rentals guarantees uptime as part of their SLA. If a rig experiences issues, they will re-provision your rental or issue a credit.',
               },
               {
                 q: 'Can I extend my rental?',
@@ -230,13 +245,13 @@ export default async function HomePage() {
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
         <h2 className="text-4xl md:text-5xl font-black text-white mb-6">Ready to Start Mining?</h2>
         <p className="text-gray-400 text-xl mb-10 max-w-xl mx-auto">
-          Pick a package, pay with crypto, and let our platform handle the rest.
+          Pick an algorithm, set your hashrate, pay with crypto, and let our platform handle the rest.
         </p>
         <Link
           href="/packages"
           className="inline-flex items-center gap-2 px-10 py-5 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold text-lg rounded-xl hover:from-orange-400 hover:to-yellow-400 transition-all shadow-2xl shadow-orange-500/25 hover:shadow-orange-500/40 hover:scale-105"
         >
-          View All Packages →
+          Build Your Package →
         </Link>
       </section>
     </>

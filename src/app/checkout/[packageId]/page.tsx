@@ -1,15 +1,16 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useState, useEffect, useCallback } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type { Package, PaymentInvoice } from '@/types';
 import { SUPPORTED_CURRENCIES, ALGORITHM_COLORS } from '@/types';
 
 type CheckoutStep = 'details' | 'payment' | 'confirming';
 
-export default function CheckoutPage() {
+function CheckoutContent() {
   const { packageId } = useParams<{ packageId: string }>();
+  const searchParams = useSearchParams();
   const router = useRouter();
 
   const [pkg, setPkg] = useState<Package | null>(null);
@@ -21,11 +22,14 @@ export default function CheckoutPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Pre-fill currency from query param (passed by packages builder)
+  const initialCurrency = searchParams.get('currency') ?? 'btc';
+
   // Form state
   const [form, setForm] = useState({
     email: '',
     workerName: '',
-    paymentCurrency: 'btc',
+    paymentCurrency: initialCurrency,
   });
 
   // Fetch package
@@ -343,5 +347,13 @@ export default function CheckoutPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function CheckoutPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" /></div>}>
+      <CheckoutContent />
+    </Suspense>
   );
 }

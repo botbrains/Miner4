@@ -40,7 +40,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Order already has a payment' }, { status: 409 });
     }
 
-    const baseUrl = process.env.BASE_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000';
+    const baseUrl = process.env.BASE_URL || process.env.NEXT_PUBLIC_BASE_URL;
+    if (!baseUrl) {
+      console.error('[payments/create] BASE_URL / NEXT_PUBLIC_BASE_URL is not set');
+      return NextResponse.json(
+        { success: false, error: 'Server misconfiguration: deployment URL is not set' },
+        { status: 500 },
+      );
+    }
 
     const invoice = await createPayment({
       priceAmount: row.price_usd,

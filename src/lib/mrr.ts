@@ -147,11 +147,11 @@ export async function provisionMiner(
   // Return null when no rigs satisfy the hashrate/unit requirement
   if (!suitable.length) return null;
 
-  // Pick cheapest rig with a valid positive price
+  // Return null when no rigs have a valid positive price
   const priced = suitable.filter(r => typeof r.price?.BTC?.price === 'number' && r.price.BTC.price > 0);
-  const candidates = priced.length ? priced : suitable;
-  candidates.sort((a, b) => (a.price?.BTC?.price ?? 0) - (b.price?.BTC?.price ?? 0));
-  const rig = candidates[0];
+  if (!priced.length) return null;
+  priced.sort((a, b) => a.price.BTC.price - b.price.BTC.price);
+  const rig = priced[0];
 
   return rentRig(rig.id, durationHours, workerName);
 }

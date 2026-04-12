@@ -48,9 +48,9 @@ export async function POST(req: Request) {
       payCurrency,
       orderId,
       orderDescription: `Hashrate rental – ${row.package_name}`,
-      ipnCallbackUrl:   `${baseUrl}/api/payments/webhook`,
-      successRedirectUrl: `${baseUrl}/order/${orderId}?status=success`,
-      cancelRedirectUrl:  `${baseUrl}/order/${orderId}?status=cancelled`,
+      ipnCallbackUrl:     new URL('/api/payments/webhook', baseUrl).toString(),
+      successRedirectUrl: new URL(`/order/${orderId}?status=success`, baseUrl).toString(),
+      cancelRedirectUrl:  new URL(`/order/${orderId}?status=cancelled`, baseUrl).toString(),
     });
 
     db.prepare(`

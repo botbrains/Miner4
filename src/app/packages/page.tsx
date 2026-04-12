@@ -51,18 +51,28 @@ function PackagesBuilder() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch live price whenever config changes
   const fetchPricing = useCallback((algo: string, hr: number, unit: string, dur: number) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
+      // Abort any in-flight request before starting a new one
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      const { signal } = controller;
+
       setPricingLoading(true);
       setPricingError(null);
       try {
         const res = await fetch(
           `/api/pricing?algorithm=${encodeURIComponent(algo)}&hashrate=${hr}&unit=${encodeURIComponent(unit)}&duration=${dur}`,
+          { signal },
         );
+        if (signal.aborted) return;
         const data = await res.json() as { success: boolean; data: PricingResult; error?: string };
+        if (signal.aborted) return;
         if (data.success) {
           setPricing(data.data);
         } else {
@@ -70,10 +80,11 @@ function PackagesBuilder() {
           setPricing(null);
         }
       } catch {
+        if (signal.aborted) return;
         setPricingError('Network error – could not fetch pricing');
         setPricing(null);
       } finally {
-        setPricingLoading(false);
+        if (!signal.aborted) setPricingLoading(false);
       }
     }, 400);
   }, []);
@@ -82,10 +93,11 @@ function PackagesBuilder() {
     fetchPricing(algorithm.id, hashrate, algorithm.unit, duration.hours);
   }, [algorithm, hashrate, duration, fetchPricing]);
 
-  // Clear any pending debounce on unmount to avoid state updates after navigation
+  // Clear any pending debounce and abort any in-flight fetch on unmount
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      abortControllerRef.current?.abort();
     };
   }, []);
 

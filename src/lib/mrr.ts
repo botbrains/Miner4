@@ -11,6 +11,9 @@ import crypto from 'crypto';
 
 const MRR_BASE = 'https://www.miningrigrentals.com/api/v2';
 
+/** Monotonically increasing counter to ensure unique nonces per process. */
+let _nonceCounter = 0;
+
 /** Throw a clear error when API credentials are not set. */
 function requireKeys() {
   if (!process.env.MRR_API_KEY || !process.env.MRR_API_SECRET) {
@@ -23,7 +26,7 @@ function requireKeys() {
 function buildHeaders(endpoint: string, body: string = '') {
   const key    = process.env.MRR_API_KEY    ?? '';
   const secret = process.env.MRR_API_SECRET ?? '';
-  const nonce  = Date.now().toString();
+  const nonce  = `${Date.now()}${(++_nonceCounter).toString().padStart(6, '0')}`;
   const digest = key + nonce + endpoint + body;
   const sign   = crypto.createHmac('sha1', secret).update(digest).digest('hex');
 
@@ -132,13 +135,16 @@ function normalizeUnit(unit: string): string {
 }
 
 /**
- * Select the cheapest set of available rigs that collectively meet the required hashrate.
+ * Select available rigs that meet the required hashrate using a cost-aware heuristic.
  *
  * Strategy:
  * 1. If a single rig is available whose hashrate is within ±5 % of `requiredHashrate`,
- *    return that rig (lowest cost first).
+ *    return the lowest-cost matching rig.
  * 2. Otherwise aggregate the most cost-efficient rigs (lowest BTC per hash) until the
  *    combined hashrate reaches at least `requiredHashrate * 0.95` (±5 % lower bound).
+ *
+ * Note: for multi-rig selection, this optimizes for BTC-per-hash efficiency rather than
+ * guaranteeing the minimum possible total rental cost.
  *
  * Returns `null` when the available rigs cannot collectively satisfy the requirement.
  */
@@ -147,15 +153,25 @@ export function selectRigsForHashrate(
   requiredHashrate: number,
   unit: string,
 ): MrrRig[] | null {
+  if (requiredHashrate <= 0) return null;
+
   const unitNorm = normalizeUnit(unit);
 
-  // Filter rigs by unit and valid price
+  // Filter rigs by unit, valid price, and positive advertised hashrate
   const eligible = rigs.filter(rig => {
     const h = rig.hashrate?.advertised;
     if (!h) return false;
     const rigUnit = normalizeUnit(h.type ?? '');
     const price = rig.price?.BTC?.price;
-    return rigUnit === unitNorm && typeof price === 'number' && price > 0;
+    const hash = h.hash;
+    return (
+      rigUnit === unitNorm &&
+      typeof price === 'number' &&
+      price > 0 &&
+      typeof hash === 'number' &&
+      Number.isFinite(hash) &&
+      hash > 0
+    );
   });
 
   if (!eligible.length) return null;

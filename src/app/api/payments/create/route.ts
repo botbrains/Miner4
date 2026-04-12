@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Order already has a payment' }, { status: 409 });
     }
 
-    const origin = req.headers.get('origin') ?? process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000';
+    const baseUrl = process.env.BASE_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000';
 
     const invoice = await createPayment({
       priceAmount: row.price_usd,
@@ -48,9 +48,9 @@ export async function POST(req: Request) {
       payCurrency,
       orderId,
       orderDescription: `Hashrate rental – ${row.package_name}`,
-      ipnCallbackUrl:   `${origin}/api/payments/webhook`,
-      successRedirectUrl: `${origin}/order/${orderId}?status=success`,
-      cancelRedirectUrl:  `${origin}/order/${orderId}?status=cancelled`,
+      ipnCallbackUrl:   `${baseUrl}/api/payments/webhook`,
+      successRedirectUrl: `${baseUrl}/order/${orderId}?status=success`,
+      cancelRedirectUrl:  `${baseUrl}/order/${orderId}?status=cancelled`,
     });
 
     db.prepare(`

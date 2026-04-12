@@ -144,10 +144,12 @@ export async function provisionMiner(
     return rigUnit === reqUnit && h.hash >= requiredHashrate;
   });
 
-  // Fall back to all available rigs if none match exactly
-  const candidates = suitable.length ? suitable : rigs;
+  // Return null when no rigs satisfy the hashrate/unit requirement
+  if (!suitable.length) return null;
 
-  // Pick cheapest
+  // Pick cheapest rig with a valid positive price
+  const priced = suitable.filter(r => typeof r.price?.BTC?.price === 'number' && r.price.BTC.price > 0);
+  const candidates = priced.length ? priced : suitable;
   candidates.sort((a, b) => (a.price?.BTC?.price ?? 0) - (b.price?.BTC?.price ?? 0));
   const rig = candidates[0];
 

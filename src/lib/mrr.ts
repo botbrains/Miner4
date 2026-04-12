@@ -10,6 +10,7 @@
 import crypto from 'crypto';
 
 const MRR_BASE = 'https://www.miningrigrentals.com/api/v2';
+const MS_PER_HOUR = 3_600_000;
 
 function buildHeaders(endpoint: string, body: string = '') {
   const key    = process.env.MRR_API_KEY    ?? '';
@@ -124,7 +125,7 @@ export async function provisionMiner(
       rentalId: `demo-${Date.now()}`,
       rigId: 0,
       start: new Date().toISOString(),
-      end: new Date(Date.now() + durationHours * 3600_000).toISOString(),
+      end: new Date(Date.now() + durationHours * MS_PER_HOUR).toISOString(),
     };
   }
 

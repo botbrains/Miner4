@@ -54,8 +54,8 @@ export default function OrderPage() {
   useEffect(() => {
     const needsRefresh = order?.status === 'awaiting_payment' || order?.payment_status === 'confirming';
     if (!needsRefresh) return;
-    const t = setInterval(fetchOrder, 15_000);
-    return () => clearInterval(t);
+    const refreshInterval = setInterval(fetchOrder, 15_000);
+    return () => clearInterval(refreshInterval);
   }, [order, fetchOrder]);
 
   const handleCopy = (text: string) => {

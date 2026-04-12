@@ -40,7 +40,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Order already has a payment' }, { status: 409 });
     }
 
-    const origin = req.headers.get('origin') ?? process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000';
+    const baseUrl = process.env.BASE_URL || process.env.NEXT_PUBLIC_BASE_URL;
+    if (!baseUrl) {
+      console.error('[payments/create] BASE_URL / NEXT_PUBLIC_BASE_URL is not set');
+      return NextResponse.json(
+        { success: false, error: 'Server misconfiguration: deployment URL is not set' },
+        { status: 500 },
+      );
+    }
 
     const invoice = await createPayment({
       priceAmount: row.price_usd,
@@ -48,9 +55,9 @@ export async function POST(req: Request) {
       payCurrency,
       orderId,
       orderDescription: `Hashrate rental – ${row.package_name}`,
-      ipnCallbackUrl:   `${origin}/api/payments/webhook`,
-      successRedirectUrl: `${origin}/order/${orderId}?status=success`,
-      cancelRedirectUrl:  `${origin}/order/${orderId}?status=cancelled`,
+      ipnCallbackUrl:     new URL('/api/payments/webhook', baseUrl).toString(),
+      successRedirectUrl: new URL(`/order/${orderId}?status=success`, baseUrl).toString(),
+      cancelRedirectUrl:  new URL(`/order/${orderId}?status=cancelled`, baseUrl).toString(),
     });
 
     db.prepare(`

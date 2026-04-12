@@ -1,11 +1,11 @@
 # Miner4
 
-A full-stack hashrate rental marketplace — like NiceHash and Mining Rig Rentals — built with **Next.js 15**, **Tailwind CSS**, and **SQLite**.
+A full-stack hashrate rental marketplace — like NiceHash and Mining Rig Rentals — built with **Next.js 16**, **Tailwind CSS**, and **SQLite**.
 
 ## Features
 
 - 🖥 **Modern dark UI** — responsive, gradient-accented design with animated elements
-- ⚡ **Dynamic hashrate packages** — 10 pre-seeded packages across SHA-256, Ethash, Scrypt, X11, RandomX
+- ⚡ **Dynamic hashrate packages** — build custom packages across SHA-256, Ethash, Scrypt, X11, RandomX with live pricing
 - 🔒 **Crypto-only checkout** — integrates with [NOWPayments](https://nowpayments.io) to accept BTC, ETH, LTC, XMR, USDT, USDC, SOL, BNB
 - ⛏ **Auto-provisioning** — on confirmed payment, automatically rents the best-priced rig from [Mining Rig Rentals API v2](https://www.miningrigrentals.com/apidoc/v2)
 - 📦 **Order tracking** — real-time order status page with payment confirmation polling
@@ -15,7 +15,7 @@ A full-stack hashrate rental marketplace — like NiceHash and Mining Rig Rental
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Next.js 15 (App Router) |
+| Framework | Next.js 16 (App Router) |
 | Styling | Tailwind CSS v4 |
 | Database | SQLite via `better-sqlite3` |
 | Payments | NOWPayments API |
@@ -25,8 +25,8 @@ A full-stack hashrate rental marketplace — like NiceHash and Mining Rig Rental
 
 | Route | Description |
 |-------|-------------|
-| `/` | Landing page with hero, popular packages, how-it-works, FAQ |
-| `/packages` | Full package catalog with algorithm filtering & sorting |
+| `/` | Landing page with hero, algorithm cards, how-it-works, FAQ |
+| `/packages` | Interactive hashrate builder (algorithm, hashrate slider, duration, currency) |
 | `/checkout/[packageId]` | Two-step checkout: enter details → pay with crypto |
 | `/order/[id]` | Order status & payment tracking (auto-refreshes) |
 
@@ -34,7 +34,9 @@ A full-stack hashrate rental marketplace — like NiceHash and Mining Rig Rental
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/api/pricing` | GET | Live price from MRR market data |
 | `/api/packages` | GET | List all hashrate packages |
+| `/api/packages` | POST | Create a dynamic package with computed price |
 | `/api/packages/[id]` | GET | Get a single package |
 | `/api/orders` | POST | Create an order |
 | `/api/orders/[id]` | GET | Get order status |

@@ -51,18 +51,28 @@ function PackagesBuilder() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch live price whenever config changes
   const fetchPricing = useCallback((algo: string, hr: number, unit: string, dur: number) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
+      // Abort any in-flight request before starting a new one
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      const { signal } = controller;
+
       setPricingLoading(true);
       setPricingError(null);
       try {
         const res = await fetch(
           `/api/pricing?algorithm=${encodeURIComponent(algo)}&hashrate=${hr}&unit=${encodeURIComponent(unit)}&duration=${dur}`,
+          { signal },
         );
+        if (signal.aborted) return;
         const data = await res.json() as { success: boolean; data: PricingResult; error?: string };
+        if (signal.aborted) return;
         if (data.success) {
           setPricing(data.data);
         } else {
@@ -70,10 +80,11 @@ function PackagesBuilder() {
           setPricing(null);
         }
       } catch {
+        if (signal.aborted) return;
         setPricingError('Network error – could not fetch pricing');
         setPricing(null);
       } finally {
-        setPricingLoading(false);
+        if (!signal.aborted) setPricingLoading(false);
       }
     }, 400);
   }, []);
@@ -81,6 +92,14 @@ function PackagesBuilder() {
   useEffect(() => {
     fetchPricing(algorithm.id, hashrate, algorithm.unit, duration.hours);
   }, [algorithm, hashrate, duration, fetchPricing]);
+
+  // Clear any pending debounce and abort any in-flight fetch on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   const handleAlgorithmChange = (algo: typeof ALGORITHMS[0]) => {
     setAlgorithm(algo);
@@ -122,7 +141,7 @@ function PackagesBuilder() {
       <div className="text-center mb-12">
         <h1 className="text-4xl font-black text-white mb-3">Build Your Hashrate Package</h1>
         <p className="text-gray-400 text-lg max-w-2xl mx-auto">
-          Choose your algorithm, set the hashrate and duration. Pricing is calculated live from Mining Rig Rentals at a 13% markup + $1.99 service fee.
+          Choose your algorithm, set the hashrate and duration. Pricing is calculated live from Mining Rig Rentals.
         </p>
       </div>
 
@@ -146,7 +165,7 @@ function PackagesBuilder() {
                     className={`flex flex-col gap-1 p-4 rounded-xl border text-left transition-all
                       ${active
                         ? 'border-orange-500 bg-orange-500/10 shadow-lg shadow-orange-500/10'
-                        : 'border-gray-700 bg-gray-800 hover:border-gray-600 hover:bg-gray-750'
+                        : 'border-gray-700 bg-gray-800 hover:border-gray-600 hover:bg-gray-700'
                       }`}
                   >
                     <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase w-fit ${color}`}>
@@ -296,16 +315,12 @@ function PackagesBuilder() {
               {!pricingLoading && pricing?.keysConfigured && (
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between text-gray-400">
-                    <span>MRR base cost</span>
-                    <span className="font-mono">${pricing.mrrCostUsd.toFixed(2)}</span>
+                    <span>Algorithm</span>
+                    <span className="font-mono">{pricing.algorithm}</span>
                   </div>
                   <div className="flex justify-between text-gray-400">
-                    <span>13% marketplace markup</span>
-                    <span className="font-mono">+${pricing.markupUsd.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>Miner4 fee</span>
-                    <span className="font-mono">+${pricing.feeUsd.toFixed(2)}</span>
+                    <span>Duration</span>
+                    <span className="font-mono">{pricing.durationHours}h</span>
                   </div>
                 </div>
               )}

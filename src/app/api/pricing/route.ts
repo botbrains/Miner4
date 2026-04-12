@@ -53,7 +53,7 @@ export async function GET(req: Request) {
 
   if (!hasMrrKeys()) {
     return NextResponse.json<{ success: boolean; data: PricingResult }>({
-      success: false,
+      success: true,
       data: {
         algorithm, hashrate, unit, durationHours,
         mrrRatePerHashPerDay: 0,

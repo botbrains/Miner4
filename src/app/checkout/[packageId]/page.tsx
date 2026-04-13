@@ -6,7 +6,7 @@ import Link from 'next/link';
 import type { Package, PaymentInvoice } from '@/types';
 import { SUPPORTED_CURRENCIES, ALGORITHM_COLORS } from '@/types';
 
-type CheckoutStep = 'details' | 'payment' | 'confirming';
+type CheckoutStep = 'details' | 'payment';
 
 function CheckoutContent() {
   const { packageId } = useParams<{ packageId: string }>();
@@ -20,7 +20,8 @@ function CheckoutContent() {
   const [orderId, setOrderId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [isAmountCopied, setIsAmountCopied] = useState(false);
+  const [isAddressCopied, setIsAddressCopied] = useState(false);
 
   // Pre-fill currency from query param (passed by packages builder)
   const initialCurrency = searchParams.get('currency') ?? 'btc';
@@ -89,10 +90,17 @@ function CheckoutContent() {
     }
   }, [pkg, form]);
 
-  const handleCopy = useCallback((text: string) => {
+  const handleCopyAmount = useCallback((text: string) => {
     navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setIsAmountCopied(true);
+      setTimeout(() => setIsAmountCopied(false), 2000);
+    });
+  }, []);
+
+  const handleCopyAddress = useCallback((text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setIsAddressCopied(true);
+      setTimeout(() => setIsAddressCopied(false), 2000);
     });
   }, []);
 
@@ -251,10 +259,10 @@ function CheckoutContent() {
                     {invoice.payAmount}
                   </span>
                   <button
-                    onClick={() => handleCopy(String(invoice.payAmount))}
+                    onClick={() => handleCopyAmount(String(invoice.payAmount))}
                     className="text-orange-400 hover:text-orange-300 text-xs flex items-center gap-1 transition-colors"
                   >
-                    {copied ? '✓ Copied' : 'Copy'}
+                    {isAmountCopied ? '✓ Copied' : 'Copy'}
                   </button>
                 </div>
                 <p className="text-gray-500 text-xs mt-1">≈ ${pkg.price_usd.toFixed(2)} USD</p>
@@ -265,10 +273,10 @@ function CheckoutContent() {
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-gray-400 text-sm">Payment address</span>
                   <button
-                    onClick={() => handleCopy(invoice.payAddress)}
+                    onClick={() => handleCopyAddress(invoice.payAddress)}
                     className="text-orange-400 hover:text-orange-300 text-xs flex items-center gap-1 transition-colors"
                   >
-                    {copied ? '✓ Copied' : 'Copy'}
+                    {isAddressCopied ? '✓ Copied' : 'Copy'}
                   </button>
                 </div>
                 <p className="text-white font-mono text-sm break-all leading-relaxed">{invoice.payAddress}</p>

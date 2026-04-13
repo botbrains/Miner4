@@ -16,7 +16,7 @@ const ALGORITHMS: Array<{
   default: number;
 }> = [
   { id: 'SHA-256',  label: 'SHA-256',  coin: 'Bitcoin (BTC)',    unit: 'TH/s', min: 10,  max: 1000, step: 10,  default: 100  },
-  { id: 'Ethash',   label: 'Ethash',   coin: 'Ethereum (ETC)',   unit: 'MH/s', min: 100, max: 10000, step: 100, default: 1000 },
+  { id: 'Ethash',   label: 'Ethash',   coin: 'Ethereum Classic (ETC)', unit: 'MH/s', min: 100, max: 10000, step: 100, default: 1000 },
   { id: 'Scrypt',   label: 'Scrypt',   coin: 'Litecoin (LTC)',   unit: 'MH/s', min: 100, max: 5000, step: 100, default: 500  },
   { id: 'X11',      label: 'X11',      coin: 'Dash (DASH)',      unit: 'GH/s', min: 1,   max: 100,  step: 1,   default: 10   },
   { id: 'RandomX',  label: 'RandomX',  coin: 'Monero (XMR)',     unit: 'KH/s', min: 10,  max: 500,  step: 10,  default: 100  },
@@ -315,12 +315,16 @@ function PackagesBuilder() {
               {!pricingLoading && pricing?.keysConfigured && (
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between text-gray-400">
-                    <span>Algorithm</span>
-                    <span className="font-mono">{pricing.algorithm}</span>
+                    <span>Base cost</span>
+                    <span className="font-mono">${pricing.mrrCostUsd.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-gray-400">
-                    <span>Duration</span>
-                    <span className="font-mono">{pricing.durationHours}h</span>
+                    <span>13% markup</span>
+                    <span className="font-mono">+${pricing.markupUsd.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-400">
+                    <span>Service fee</span>
+                    <span className="font-mono">+${pricing.feeUsd.toFixed(2)}</span>
                   </div>
                 </div>
               )}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { Suspense, useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type { Order } from '@/types';
@@ -23,7 +23,7 @@ const PAYMENT_STATUS_CONFIG: Record<string, { label: string; color: string }> = 
   partially_paid: { label: 'Partially Paid', color: 'text-yellow-500' },
 };
 
-export default function OrderPage() {
+function OrderContent() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const [order, setOrder] = useState<Order | null>(null);
@@ -220,5 +220,13 @@ export default function OrderPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function OrderPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" /></div>}>
+      <OrderContent />
+    </Suspense>
   );
 }

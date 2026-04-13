@@ -16,7 +16,7 @@ const ALGORITHMS: Array<{
   default: number;
 }> = [
   { id: 'SHA-256',  label: 'SHA-256',  coin: 'Bitcoin (BTC)',    unit: 'TH/s', min: 10,  max: 1000, step: 10,  default: 100  },
-  { id: 'Ethash',   label: 'Ethash',   coin: 'Ethereum (ETC)',   unit: 'MH/s', min: 100, max: 10000, step: 100, default: 1000 },
+  { id: 'Ethash',   label: 'Ethash',   coin: 'Ethereum Classic (ETC)', unit: 'MH/s', min: 100, max: 10000, step: 100, default: 1000 },
   { id: 'Scrypt',   label: 'Scrypt',   coin: 'Litecoin (LTC)',   unit: 'MH/s', min: 100, max: 5000, step: 100, default: 500  },
   { id: 'X11',      label: 'X11',      coin: 'Dash (DASH)',      unit: 'GH/s', min: 1,   max: 100,  step: 1,   default: 10   },
   { id: 'RandomX',  label: 'RandomX',  coin: 'Monero (XMR)',     unit: 'KH/s', min: 10,  max: 500,  step: 10,  default: 100  },
@@ -54,7 +54,7 @@ function PackagesBuilder() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch live price whenever config changes
-  const fetchPricing = useCallback((algo: string, hr: number, unit: string, dur: number) => {
+  const fetchPricing = useCallback((algo: string, hr: number, dur: number) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       // Abort any in-flight request before starting a new one
@@ -67,7 +67,7 @@ function PackagesBuilder() {
       setPricingError(null);
       try {
         const res = await fetch(
-          `/api/pricing?algorithm=${encodeURIComponent(algo)}&hashrate=${hr}&unit=${encodeURIComponent(unit)}&duration=${dur}`,
+          `/api/pricing?algorithm=${encodeURIComponent(algo)}&hashrate=${hr}&duration=${dur}`,
           { signal },
         );
         if (signal.aborted) return;
@@ -90,7 +90,7 @@ function PackagesBuilder() {
   }, []);
 
   useEffect(() => {
-    fetchPricing(algorithm.id, hashrate, algorithm.unit, duration.hours);
+    fetchPricing(algorithm.id, hashrate, duration.hours);
   }, [algorithm, hashrate, duration, fetchPricing]);
 
   // Clear any pending debounce and abort any in-flight fetch on unmount
@@ -111,16 +111,14 @@ function PackagesBuilder() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      // Create a dynamic package record with the live-computed price
+      // Create a dynamic package record; price is computed server-side
       const pkgRes = await fetch('/api/packages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           algorithm: algorithm.id,
           hashrate,
-          unit: algorithm.unit,
           durationHours: duration.hours,
-          priceUsd: pricing.totalUsd,
         }),
       });
       const pkgData = await pkgRes.json() as { success: boolean; data: { id: string }; error?: string };
@@ -315,12 +313,8 @@ function PackagesBuilder() {
               {!pricingLoading && pricing?.keysConfigured && (
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between text-gray-400">
-                    <span>Algorithm</span>
-                    <span className="font-mono">{pricing.algorithm}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>Duration</span>
-                    <span className="font-mono">{pricing.durationHours}h</span>
+                    <span>Service fee</span>
+                    <span className="font-mono">+${pricing.feeUsd.toFixed(2)}</span>
                   </div>
                 </div>
               )}

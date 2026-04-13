@@ -40,6 +40,9 @@ function PackagesBuilder() {
 
   const [algorithm, setAlgorithm] = useState(initialAlgo);
   const [hashrate, setHashrate]   = useState(initialAlgo.default);
+  // Draft text value for the number input so users can type freely without
+  // being immediately snapped to the min/max boundaries on every keystroke.
+  const [hashrateInput, setHashrateInput] = useState(String(initialAlgo.default));
   const [duration, setDuration]   = useState(DURATIONS[2]);     // default 24h
   const [currency, setCurrency]   = useState(SUPPORTED_CURRENCIES[0].id); // btc
 
@@ -104,6 +107,7 @@ function PackagesBuilder() {
   const handleAlgorithmChange = (algo: typeof ALGORITHMS[0]) => {
     setAlgorithm(algo);
     setHashrate(algo.default);
+    setHashrateInput(String(algo.default));
   };
 
   const handleStartMining = async () => {
@@ -188,10 +192,23 @@ function PackagesBuilder() {
                 min={algorithm.min}
                 max={algorithm.max}
                 step={algorithm.step}
-                value={hashrate}
+                value={hashrateInput}
                 onChange={e => {
+                  // Allow free typing: keep draft in sync but don't clamp yet
+                  setHashrateInput(e.target.value);
                   const v = parseFloat(e.target.value);
-                  if (!isNaN(v)) setHashrate(Math.min(algorithm.max, Math.max(algorithm.min, v)));
+                  if (!isNaN(v) && v >= algorithm.min && v <= algorithm.max) {
+                    setHashrate(v);
+                  }
+                }}
+                onBlur={() => {
+                  // Clamp and sync on blur so the field always shows a valid value
+                  const v = parseFloat(hashrateInput);
+                  const clamped = isNaN(v)
+                    ? algorithm.default
+                    : Math.min(algorithm.max, Math.max(algorithm.min, v));
+                  setHashrate(clamped);
+                  setHashrateInput(String(clamped));
                 }}
                 className="w-36 bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white font-mono text-lg focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-colors"
               />
@@ -205,8 +222,16 @@ function PackagesBuilder() {
               max={algorithm.max}
               step={algorithm.step}
               value={hashrate}
-              onChange={e => setHashrate(parseFloat(e.target.value))}
-              className="w-full h-2 rounded-full appearance-none cursor-pointer accent-orange-500"
+              onChange={e => {
+                const v = parseFloat(e.target.value);
+                setHashrate(v);
+                setHashrateInput(String(v));
+              }}
+              className="w-full h-2 rounded-full cursor-pointer accent-orange-500
+                [&::-webkit-slider-runnable-track]:h-2 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-gray-700
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-orange-500 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:shadow-orange-500/40 [&::-webkit-slider-thumb]:mt-[-6px]
+                [&::-moz-range-track]:h-2 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-gray-700
+                [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-orange-500 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:shadow-md [&::-moz-range-thumb]:shadow-orange-500/40"
             />
             <div className="flex justify-between text-gray-500 text-xs mt-2">
               <span>{algorithm.min.toLocaleString()} {algorithm.unit}</span>

@@ -6,8 +6,8 @@
 
 import { getAvailableRigs, hasMrrKeys } from '@/lib/mrr';
 
-export const MINER4_FEE_USD    = 1.99;
-export const MARKUP_MULTIPLIER = 1.13;   // internal only—never exposed to clients
+export const MINER4_FEE_USD = 1.99;
+const MARKUP_MULTIPLIER     = 1.13;   // internal only—never exposed to clients
 
 /** Fetch BTC/USD rate from CoinGecko (no API key required). */
 export async function getBtcUsdRate(): Promise<number> {
@@ -41,7 +41,6 @@ export interface ComputedPrice {
 export async function computePrice(
   algorithm: string,
   hashrate: number,
-  unit: string,
   durationHours: number,
 ): Promise<ComputedPrice> {
   const feeUsd = MINER4_FEE_USD;
@@ -62,6 +61,10 @@ export async function computePrice(
   const prices = rigs
     .map(r => r.price?.BTC?.price)
     .filter((p): p is number => typeof p === 'number' && p > 0);
+
+  if (!prices.length) {
+    throw new Error(`No priced rigs available for algorithm: ${algorithm}`);
+  }
 
   const mrrRatePerHashPerDay = Math.min(...prices);
   const durationDays  = durationHours / 24;

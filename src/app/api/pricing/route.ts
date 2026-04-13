@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { computePrice, MINER4_FEE_USD } from '@/lib/pricing';
+import { computePrice } from '@/lib/pricing';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +22,7 @@ export async function GET(req: Request) {
   const unit         = searchParams.get('unit')         ?? 'TH/s';
   const durationHours = parseInt(searchParams.get('duration') ?? '24', 10);
 
-  if (!hashrate || hashrate <= 0 || !durationHours || durationHours <= 0) {
+  if (!Number.isFinite(hashrate) || hashrate <= 0 || !Number.isFinite(durationHours) || durationHours <= 0) {
     return NextResponse.json(
       { success: false, error: 'hashrate and duration must be positive numbers' },
       { status: 400 },
@@ -30,7 +30,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const price = await computePrice(algorithm, hashrate, unit, durationHours);
+    const price = await computePrice(algorithm, hashrate, durationHours);
 
     const result: PricingResult = {
       algorithm,
@@ -47,7 +47,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to compute pricing';
-    if (msg.startsWith('No available rigs')) {
+    if (msg.startsWith('No available rigs') || msg.startsWith('No priced rigs')) {
       return NextResponse.json({ success: false, error: msg }, { status: 404 });
     }
     console.error('[pricing] GET error:', err);
@@ -57,6 +57,3 @@ export async function GET(req: Request) {
     );
   }
 }
-
-// Re-export the constant so consumers don't need to know its source
-export { MINER4_FEE_USD };

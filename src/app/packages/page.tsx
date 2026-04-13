@@ -118,7 +118,6 @@ function PackagesBuilder() {
         body: JSON.stringify({
           algorithm: algorithm.id,
           hashrate,
-          unit: algorithm.unit,
           durationHours: duration.hours,
         }),
       });

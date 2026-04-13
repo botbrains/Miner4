@@ -111,7 +111,7 @@ function PackagesBuilder() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      // Create a dynamic package record with the live-computed price
+      // Create a dynamic package record; price is computed server-side
       const pkgRes = await fetch('/api/packages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -120,7 +120,6 @@ function PackagesBuilder() {
           hashrate,
           unit: algorithm.unit,
           durationHours: duration.hours,
-          priceUsd: pricing.totalUsd,
         }),
       });
       const pkgData = await pkgRes.json() as { success: boolean; data: { id: string }; error?: string };

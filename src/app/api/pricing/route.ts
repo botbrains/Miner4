@@ -1,26 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getAvailableRigs, hasMrrKeys } from '@/lib/mrr';
+import { computePrice, MINER4_FEE_USD } from '@/lib/pricing';
 
 export const dynamic = 'force-dynamic';
-
-const MINER4_FEE_USD   = 1.99;
-const MARKUP_MULTIPLIER = 1.13;
-
-/** Fetch BTC/USD rate from CoinGecko (no API key required). */
-async function getBtcUsdRate(): Promise<number> {
-  try {
-    const res = await fetch(
-      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
-      { next: { revalidate: 60 } },
-    );
-    if (!res.ok) throw new Error('CoinGecko unavailable');
-    const data = await res.json() as { bitcoin: { usd: number } };
-    return data.bitcoin.usd;
-  } catch {
-    // Fallback rate if CoinGecko is unreachable
-    return 65_000;
-  }
-}
 
 export interface PricingResult {
   algorithm: string;
@@ -48,61 +29,27 @@ export async function GET(req: Request) {
     );
   }
 
-  if (!hasMrrKeys()) {
-    return NextResponse.json<{ success: boolean; data: PricingResult }>({
-      success: true,
-      data: {
-        algorithm, hashrate, unit, durationHours,
-        feeUsd: MINER4_FEE_USD,
-        totalUsd: 0,
-        btcUsdRate: 0,
-        availableRigs: 0,
-        keysConfigured: false,
-      },
-    });
-  }
-
   try {
-    const [rigs, btcUsdRate] = await Promise.all([
-      getAvailableRigs(algorithm),
-      getBtcUsdRate(),
-    ]);
-
-    if (!rigs.length) {
-      return NextResponse.json(
-        { success: false, error: `No available rigs found for algorithm: ${algorithm}` },
-        { status: 404 },
-      );
-    }
-
-    // Get the minimum BTC price per hash unit per day across available rigs
-    const prices = rigs
-      .map(r => r.price?.BTC?.price)
-      .filter((p): p is number => typeof p === 'number' && p > 0);
-
-    const mrrRatePerHashPerDay = Math.min(...prices);
-
-    // Cost = rate × hashrate × durationDays
-    const durationDays  = durationHours / 24;
-    const mrrCostBtc    = mrrRatePerHashPerDay * hashrate * durationDays;
-    const mrrCostUsd    = mrrCostBtc * btcUsdRate;
-    const feeUsd        = MINER4_FEE_USD;
-    const totalUsd      = mrrCostUsd * MARKUP_MULTIPLIER + feeUsd;
+    const price = await computePrice(algorithm, hashrate, unit, durationHours);
 
     const result: PricingResult = {
       algorithm,
       hashrate,
       unit,
       durationHours,
-      feeUsd,
-      totalUsd:   +totalUsd.toFixed(2),
-      btcUsdRate: +btcUsdRate.toFixed(2),
-      availableRigs: rigs.length,
-      keysConfigured: true,
+      feeUsd:       price.feeUsd,
+      totalUsd:     price.totalUsd,
+      btcUsdRate:   price.btcUsdRate,
+      availableRigs: price.availableRigs,
+      keysConfigured: price.keysConfigured,
     };
 
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to compute pricing';
+    if (msg.startsWith('No available rigs')) {
+      return NextResponse.json({ success: false, error: msg }, { status: 404 });
+    }
     console.error('[pricing] GET error:', err);
     return NextResponse.json(
       { success: false, error: 'Failed to compute pricing' },
@@ -110,3 +57,6 @@ export async function GET(req: Request) {
     );
   }
 }
+
+// Re-export the constant so consumers don't need to know its source
+export { MINER4_FEE_USD };

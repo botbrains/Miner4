@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
  * Server-authoritative map of algorithm → hashrate unit.
  * The client may suggest an algorithm name but unit is always derived here,
  * so a malformed/spoofed unit cannot affect provisioning.
+ * Algorithms not present in this map are rejected with HTTP 400.
  */
 const ALGORITHM_UNIT_MAP: Record<string, string> = {
   'SHA-256': 'TH/s',

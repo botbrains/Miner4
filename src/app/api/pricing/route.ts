@@ -6,7 +6,6 @@ export const dynamic = 'force-dynamic';
 export interface PricingResult {
   algorithm: string;
   hashrate: number;
-  unit: string;
   durationHours: number;
   feeUsd: number;                 // $1.99 Miner4 fee
   totalUsd: number;               // final customer price
@@ -17,9 +16,8 @@ export interface PricingResult {
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const algorithm    = searchParams.get('algorithm')    ?? 'SHA-256';
-  const hashrate     = parseFloat(searchParams.get('hashrate')     ?? '0');
-  const unit         = searchParams.get('unit')         ?? 'TH/s';
+  const algorithm     = searchParams.get('algorithm') ?? 'SHA-256';
+  const hashrate      = parseFloat(searchParams.get('hashrate') ?? '0');
   const durationHours = parseInt(searchParams.get('duration') ?? '24', 10);
 
   if (!Number.isFinite(hashrate) || hashrate <= 0 || !Number.isFinite(durationHours) || durationHours <= 0) {
@@ -35,7 +33,6 @@ export async function GET(req: Request) {
     const result: PricingResult = {
       algorithm,
       hashrate,
-      unit,
       durationHours,
       feeUsd:       price.feeUsd,
       totalUsd:     price.totalUsd,

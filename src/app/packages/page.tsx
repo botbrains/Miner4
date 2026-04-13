@@ -54,7 +54,7 @@ function PackagesBuilder() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch live price whenever config changes
-  const fetchPricing = useCallback((algo: string, hr: number, unit: string, dur: number) => {
+  const fetchPricing = useCallback((algo: string, hr: number, dur: number) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       // Abort any in-flight request before starting a new one
@@ -67,7 +67,7 @@ function PackagesBuilder() {
       setPricingError(null);
       try {
         const res = await fetch(
-          `/api/pricing?algorithm=${encodeURIComponent(algo)}&hashrate=${hr}&unit=${encodeURIComponent(unit)}&duration=${dur}`,
+          `/api/pricing?algorithm=${encodeURIComponent(algo)}&hashrate=${hr}&duration=${dur}`,
           { signal },
         );
         if (signal.aborted) return;
@@ -90,7 +90,7 @@ function PackagesBuilder() {
   }, []);
 
   useEffect(() => {
-    fetchPricing(algorithm.id, hashrate, algorithm.unit, duration.hours);
+    fetchPricing(algorithm.id, hashrate, duration.hours);
   }, [algorithm, hashrate, duration, fetchPricing]);
 
   // Clear any pending debounce and abort any in-flight fetch on unmount

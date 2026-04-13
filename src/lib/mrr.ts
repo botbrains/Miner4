@@ -189,11 +189,12 @@ export async function getRentalStatus(rentalId: string) {
 
 /**
  * Normalise a hashrate unit string for comparison.
- * Converts to lower-case, removes '/', and strips a trailing 's' so that
- * MRR's bare units ('TH', 'MH') match the app's display units ('TH/s', 'MH/s').
+ * Converts to lower-case and strips the '/s' or trailing '/' rate-per-second
+ * suffix so that MRR's bare units ('TH', 'MH') match the app's display units
+ * ('TH/s', 'MH/s').
  */
 function normalizeUnit(unit: string): string {
-  return unit.toLowerCase().replace('/', '').replace(/s$/, '');
+  return unit.toLowerCase().replace(/\/s$/, '').replace(/\/$/, '');
 }
 
 /**

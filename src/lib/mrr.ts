@@ -328,11 +328,11 @@ export function hasMrrKeys(): boolean {
  * Suggested price for a single algorithm as returned by GET /info/algos.
  * This is the MRR-authoritative server-side price used as the primary pricing source.
  */
-export interface MrrAlgoPrice {
+export interface MrrAlgoSuggestedPrice {
   /** MRR algorithm name (e.g. 'sha256') */
   name: string;
   /** Suggested price in BTC per hash-unit per day (e.g. 0.00001500 BTC/TH/day) */
-  suggestedBtcPerUnit: number;
+  btcPerUnitPerDay: number;
   /** Hash unit as returned by MRR (e.g. 'TH', 'MH') */
   unit: string;
 }
@@ -347,7 +347,7 @@ export interface MrrAlgoPrice {
  * Returns null when the algorithm is not found, pricing data is unavailable, or
  * the request fails (so callers can fall back to rig-based pricing).
  */
-export async function getAlgoMinPrice(algorithm: string): Promise<MrrAlgoPrice | null> {
+export async function getAlgoSuggestedPrice(algorithm: string): Promise<MrrAlgoSuggestedPrice | null> {
   const mrrAlgo = toMrrAlgoName(algorithm);
 
   type AlgoEntry = {
@@ -381,7 +381,7 @@ export async function getAlgoMinPrice(algorithm: string): Promise<MrrAlgoPrice |
 
     if (!Number.isFinite(amount) || amount <= 0) return null;
 
-    return { name: mrrAlgo, suggestedBtcPerUnit: amount, unit };
+    return { name: mrrAlgo, btcPerUnitPerDay: amount, unit };
   } catch {
     // Non-fatal: caller should fall back to rig-based pricing
     return null;

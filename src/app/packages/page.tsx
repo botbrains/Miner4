@@ -315,14 +315,6 @@ function PackagesBuilder() {
               {!pricingLoading && pricing?.keysConfigured && (
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between text-gray-400">
-                    <span>Base cost</span>
-                    <span className="font-mono">${pricing.mrrCostUsd.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>13% markup</span>
-                    <span className="font-mono">+${pricing.markupUsd.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
                     <span>Service fee</span>
                     <span className="font-mono">+${pricing.feeUsd.toFixed(2)}</span>
                   </div>

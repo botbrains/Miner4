@@ -27,9 +27,6 @@ export interface PricingResult {
   hashrate: number;
   unit: string;
   durationHours: number;
-  mrrRatePerHashPerDay: number;   // BTC per hash-unit per day (min across available rigs)
-  mrrCostUsd: number;             // raw MRR cost in USD
-  markupUsd: number;              // 13% markup
   feeUsd: number;                 // $1.99 Miner4 fee
   totalUsd: number;               // final customer price
   btcUsdRate: number;
@@ -56,9 +53,6 @@ export async function GET(req: Request) {
       success: true,
       data: {
         algorithm, hashrate, unit, durationHours,
-        mrrRatePerHashPerDay: 0,
-        mrrCostUsd: 0,
-        markupUsd: 0,
         feeUsd: MINER4_FEE_USD,
         totalUsd: 0,
         btcUsdRate: 0,
@@ -92,7 +86,6 @@ export async function GET(req: Request) {
     const durationDays  = durationHours / 24;
     const mrrCostBtc    = mrrRatePerHashPerDay * hashrate * durationDays;
     const mrrCostUsd    = mrrCostBtc * btcUsdRate;
-    const markupUsd     = mrrCostUsd * (MARKUP_MULTIPLIER - 1);
     const feeUsd        = MINER4_FEE_USD;
     const totalUsd      = mrrCostUsd * MARKUP_MULTIPLIER + feeUsd;
 
@@ -101,9 +94,6 @@ export async function GET(req: Request) {
       hashrate,
       unit,
       durationHours,
-      mrrRatePerHashPerDay,
-      mrrCostUsd: +mrrCostUsd.toFixed(4),
-      markupUsd:  +markupUsd.toFixed(4),
       feeUsd,
       totalUsd:   +totalUsd.toFixed(2),
       btcUsdRate: +btcUsdRate.toFixed(2),

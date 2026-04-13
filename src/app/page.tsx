@@ -57,7 +57,7 @@ export default function HomePage() {
               { value: '5',     label: 'Algorithms' },
               { value: '100%',  label: 'Crypto Payments' },
               { value: '<5 min', label: 'Activation Time' },
-              { value: '13%',   label: 'Fair Markup' },
+              { value: '24/7',  label: 'Live Pricing' },
             ].map(stat => (
               <div key={stat.label} className="text-center">
                 <div className="text-2xl font-black text-white">{stat.value}</div>
@@ -128,7 +128,7 @@ export default function HomePage() {
               {
                 step: '01',
                 title: 'Configure Your Package',
-                desc: 'Select an algorithm, set your desired hashrate and rental duration. Pricing is calculated live from Mining Rig Rentals at a 13% markup plus a $1.99 service fee.',
+                desc: 'Select an algorithm, set your desired hashrate and rental duration. Pricing is calculated live from Mining Rig Rentals.',
                 icon: (
                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -208,7 +208,7 @@ export default function HomePage() {
             {[
               {
                 q: 'How is pricing calculated?',
-                a: 'We fetch live pricing from Mining Rig Rentals for your chosen algorithm. Your cost is the minimum available market rate × your hashrate × duration days, plus a 13% marketplace markup and a flat $1.99 Miner4 service fee.',
+                a: 'We fetch live pricing from Mining Rig Rentals for your chosen algorithm. Your cost is based on the current market rate for your chosen hashrate and duration, plus a small $1.99 Miner4 service fee.',
               },
               {
                 q: 'How quickly does mining start?',

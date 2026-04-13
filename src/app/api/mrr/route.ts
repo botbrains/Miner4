@@ -43,7 +43,7 @@ export async function GET(req: Request) {
 
     const prices = rigs
       .map(r => r.price?.BTC?.price)
-      .filter((p): p is number => typeof p === 'number' && p > 0);
+      .filter((p): p is number => Number.isFinite(p) && p > 0);
 
     const avg = prices.length ? prices.reduce((s, p) => s + p, 0) / prices.length : null;
     const min = prices.length ? Math.min(...prices) : null;

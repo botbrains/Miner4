@@ -14,6 +14,30 @@ const MRR_BASE = 'https://www.miningrigrentals.com/api/v2';
 /** Monotonically increasing counter to ensure unique nonces per process. */
 let _nonceCounter = 0;
 
+/**
+ * Map of internal algorithm names to MRR API type names (lowercase, no separators).
+ * MRR API v2 expects lowercase algorithm names in query parameters.
+ */
+const MRR_ALGO_NAME_MAP: Record<string, string> = {
+  'SHA-256':  'sha256',
+  'Ethash':   'ethash',
+  'Scrypt':   'scrypt',
+  'X11':      'x11',
+  'RandomX':  'randomx',
+};
+
+/** Convert an internal algorithm name to the MRR API type name. */
+export function toMrrAlgoName(algorithm: string): string {
+  return MRR_ALGO_NAME_MAP[algorithm] ?? algorithm.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** Safe numeric parser — handles both number and string values from the MRR API. */
+function parseNum(val: number | string | undefined | null): number {
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') return parseFloat(val);
+  return NaN;
+}
+
 /** Throw a clear error when API credentials are not set. */
 function requireKeys() {
   if (!process.env.MRR_API_KEY || !process.env.MRR_API_SECRET) {
@@ -63,6 +87,17 @@ async function mrrRequest<T>(
   return res.json() as Promise<T>;
 }
 
+/** Raw rig shape as returned by the MRR API — price and hash are decimal strings. */
+interface RawMrrRig {
+  id: number;
+  name: string;
+  type: string;
+  status: { status: string };
+  hashrate: { advertised: { hash: number | string; type: string } };
+  price: { BTC: { price: number | string } };
+}
+
+/** Normalised rig shape used throughout the application — all numeric fields are numbers. */
 export interface MrrRig {
   id: number;
   name: string;
@@ -72,11 +107,34 @@ export interface MrrRig {
   price: { BTC: { price: number } };
 }
 
+/** Convert a raw MRR API rig (with string decimal fields) to a normalised MrrRig. */
+function normalizeRig(raw: RawMrrRig): MrrRig {
+  return {
+    id:     raw.id,
+    name:   raw.name,
+    type:   raw.type,
+    status: raw.status,
+    hashrate: {
+      advertised: {
+        hash: parseNum(raw.hashrate?.advertised?.hash),
+        type: raw.hashrate?.advertised?.type ?? '',
+      },
+    },
+    price: {
+      BTC: {
+        price: parseNum(raw.price?.BTC?.price),
+      },
+    },
+  };
+}
+
 /** Fetch available rigs for a given algorithm. */
 export async function getAvailableRigs(algorithm: string): Promise<MrrRig[]> {
-  type Response = { success: boolean; data: { records: MrrRig[] } };
-  const res = await mrrRequest<Response>('GET', `/rig?type=${encodeURIComponent(algorithm)}&status=available`);
-  return res.data?.records ?? [];
+  type Response = { success: boolean; data: { records: RawMrrRig[] } };
+  // MRR API v2 expects lowercase algorithm names (e.g. 'sha256', not 'SHA-256')
+  const mrrAlgo = toMrrAlgoName(algorithm);
+  const res = await mrrRequest<Response>('GET', `/rig?type=${encodeURIComponent(mrrAlgo)}&status=available`);
+  return (res.data?.records ?? []).map(normalizeRig);
 }
 
 export interface RentalResult {
@@ -129,9 +187,13 @@ export async function getRentalStatus(rentalId: string) {
   return res.data;
 }
 
-/** Normalise a hashrate unit string for comparison (lower-case, strip '/'). */
+/**
+ * Normalise a hashrate unit string for comparison.
+ * Converts to lower-case, removes '/', and strips a trailing 's' so that
+ * MRR's bare units ('TH', 'MH') match the app's display units ('TH/s', 'MH/s').
+ */
 function normalizeUnit(unit: string): string {
-  return unit.toLowerCase().replace('/', '');
+  return unit.toLowerCase().replace('/', '').replace(/s$/, '');
 }
 
 /**
@@ -166,9 +228,8 @@ export function selectRigsForHashrate(
     const hash = h.hash;
     return (
       rigUnit === unitNorm &&
-      typeof price === 'number' &&
+      Number.isFinite(price) &&
       price > 0 &&
-      typeof hash === 'number' &&
       Number.isFinite(hash) &&
       hash > 0
     );
@@ -260,5 +321,69 @@ export async function provisionMiner(
 /** Check whether MRR API credentials are configured. */
 export function hasMrrKeys(): boolean {
   return !!(process.env.MRR_API_KEY && process.env.MRR_API_SECRET);
+}
+
+/**
+ * Suggested price for a single algorithm as returned by GET /info/algos.
+ * This is the MRR-authoritative server-side price used as the primary pricing source.
+ */
+export interface MrrAlgoPrice {
+  /** MRR algorithm name (e.g. 'sha256') */
+  name: string;
+  /** Suggested price in BTC per hash-unit per day (e.g. 0.00001500 BTC/TH/day) */
+  suggestedBtcPerUnit: number;
+  /** Hash unit as returned by MRR (e.g. 'TH', 'MH') */
+  unit: string;
+}
+
+/**
+ * Fetch the MRR-suggested price for a specific algorithm via GET /info/algos.
+ *
+ * This endpoint is the recommended server-side pricing source in MRR API v2:
+ * it returns the current suggested rental price per hash unit per day for each
+ * algorithm without requiring a full rig listing.
+ *
+ * Returns null when the algorithm is not found, pricing data is unavailable, or
+ * the request fails (so callers can fall back to rig-based pricing).
+ */
+export async function getAlgoMinPrice(algorithm: string): Promise<MrrAlgoPrice | null> {
+  const mrrAlgo = toMrrAlgoName(algorithm);
+
+  type AlgoEntry = {
+    name: string;
+    display?: string;
+    suggested_price?: {
+      amount?: number | string;
+      currency?: string;
+      unit?: string;
+    };
+  };
+
+  type AlgosResponse = {
+    success: boolean;
+    data: AlgoEntry[] | { records?: AlgoEntry[] };
+  };
+
+  try {
+    const res = await mrrRequest<AlgosResponse>('GET', '/info/algos');
+    if (!res.success) return null;
+
+    const records: AlgoEntry[] = Array.isArray(res.data)
+      ? res.data
+      : ((res.data as { records?: AlgoEntry[] }).records ?? []);
+
+    const entry = records.find(a => a.name === mrrAlgo);
+    if (!entry?.suggested_price) return null;
+
+    const amount = parseNum(entry.suggested_price.amount);
+    const unit   = entry.suggested_price.unit ?? '';
+
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+
+    return { name: mrrAlgo, suggestedBtcPerUnit: amount, unit };
+  } catch {
+    // Non-fatal: caller should fall back to rig-based pricing
+    return null;
+  }
 }
 

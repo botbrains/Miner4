@@ -81,7 +81,12 @@ export async function computePrice(
     }
 
     const prices = rigs
-      .map(r => r.price?.BTC?.price)
+      .map(r => {
+        const price            = r.price?.BTC?.price;
+        const advertisedHashrate = r.hashrate?.advertised?.hash;
+        if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(advertisedHashrate) || advertisedHashrate <= 0) return NaN;
+        return price / advertisedHashrate;
+      })
       .filter((p): p is number => Number.isFinite(p) && p > 0);
 
     if (!prices.length) {

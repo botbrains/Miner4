@@ -4,7 +4,7 @@
  * client-visible code.
  */
 
-import { getAvailableRigs, hasMrrKeys } from '@/lib/mrr';
+import { getAvailableRigs, getAlgoSuggestedPrice, hasMrrKeys } from '@/lib/mrr';
 
 export const MINER4_FEE_USD = 1.99;
 const MARKUP_MULTIPLIER     = 1.13;   // internal only—never exposed to clients
@@ -32,11 +32,19 @@ export interface ComputedPrice {
   keysConfigured: boolean;
 }
 
-/**
+ /**
  * Compute the customer-facing price for a hashrate rental entirely on the
  * server.  Never accepts a price from the client.
  *
- * @throws if MRR keys are configured but no rigs are available.
+ * Pricing strategy (MRR API v2):
+ * 1. Primary:  use GET /info/algos to get the MRR-suggested price for the
+ *    algorithm — this is the server-side pricing endpoint recommended by MRR.
+ *    This is fetched in parallel with the BTC/USD rate.
+ * 2. Fallback: only if /info/algos returns no usable price, call GET /rig to
+ *    derive the minimum price from available rigs. The rig-listing call is
+ *    deferred to this path so it is never made when /info/algos succeeds.
+ *
+ * @throws if MRR keys are configured but no pricing data is available.
  */
 export async function computePrice(
   algorithm: string,
@@ -49,24 +57,40 @@ export async function computePrice(
     return { totalUsd: 0, feeUsd, btcUsdRate: 0, availableRigs: 0, keysConfigured: false };
   }
 
-  const [rigs, btcUsdRate] = await Promise.all([
-    getAvailableRigs(algorithm),
+  // Fetch the suggested algo price and BTC rate concurrently.
+  // The rig-listing call is intentionally deferred to the fallback path
+  // to avoid the overhead of a heavy /rig request when /info/algos succeeds.
+  const [algoPrice, btcUsdRate] = await Promise.all([
+    getAlgoSuggestedPrice(algorithm),
     getBtcUsdRate(),
   ]);
 
-  if (!rigs.length) {
-    throw new Error(`No available rigs found for algorithm: ${algorithm}`);
+  let mrrRatePerHashPerDay: number;
+  let availableRigs = 0;
+
+  if (algoPrice && algoPrice.btcPerUnitPerDay > 0) {
+    // Primary: use MRR's own server-side suggested price for the algorithm
+    mrrRatePerHashPerDay = algoPrice.btcPerUnitPerDay;
+  } else {
+    // Fallback: derive minimum price from available rigs
+    const rigs = await getAvailableRigs(algorithm);
+    availableRigs = rigs.length;
+
+    if (!rigs.length) {
+      throw new Error(`No available rigs found for algorithm: ${algorithm}`);
+    }
+
+    const prices = rigs
+      .map(r => r.price?.BTC?.price)
+      .filter((p): p is number => Number.isFinite(p) && p > 0);
+
+    if (!prices.length) {
+      throw new Error(`No priced rigs available for algorithm: ${algorithm}`);
+    }
+
+    mrrRatePerHashPerDay = Math.min(...prices);
   }
 
-  const prices = rigs
-    .map(r => r.price?.BTC?.price)
-    .filter((p): p is number => typeof p === 'number' && p > 0);
-
-  if (!prices.length) {
-    throw new Error(`No priced rigs available for algorithm: ${algorithm}`);
-  }
-
-  const mrrRatePerHashPerDay = Math.min(...prices);
   const durationDays  = durationHours / 24;
   const mrrCostBtc    = mrrRatePerHashPerDay * hashrate * durationDays;
   const mrrCostUsd    = mrrCostBtc * btcUsdRate;
@@ -76,7 +100,7 @@ export async function computePrice(
     totalUsd,
     feeUsd,
     btcUsdRate: +btcUsdRate.toFixed(2),
-    availableRigs: rigs.length,
+    availableRigs,
     keysConfigured: true,
   };
 }

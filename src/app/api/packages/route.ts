@@ -1,36 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { computePrice } from '@/lib/pricing';
+import { getAlgoInfoList, hasMrrKeys, toMrrAlgoName } from '@/lib/mrr';
 import { randomUUID } from 'crypto';
 import { checkRateLimit } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
-
-/**
- * Server-authoritative map of algorithm → hashrate unit.
- * The client may suggest an algorithm name but unit is always derived here,
- * so a malformed/spoofed unit cannot affect provisioning.
- * Algorithms not present in this map are rejected with HTTP 400.
- */
-const ALGORITHM_UNIT_MAP: Record<string, string> = {
-  'SHA-256': 'TH/s',
-  'Ethash':  'MH/s',
-  'Scrypt':  'MH/s',
-  'X11':     'GH/s',
-  'RandomX': 'KH/s',
-};
-
-/**
- * Minimum allowed hashrate per algorithm (in the algorithm's native unit).
- * Requests below the floor are rejected with HTTP 400.
- */
-const ALGORITHM_MIN_HASHRATE: Record<string, number> = {
-  'SHA-256': 1,
-  'Ethash':  100,
-  'Scrypt':  100,
-  'X11':     1,
-  'RandomX': 1000,
-};
 
 export async function GET() {
   try {
@@ -77,27 +52,30 @@ export async function POST(req: Request) {
       );
     }
 
-    // Validate algorithm and derive unit server-side
-    const unit = ALGORITHM_UNIT_MAP[algorithm];
-    if (!unit) {
+    if (!hasMrrKeys()) {
+      return NextResponse.json(
+        { success: false, error: 'MRR API credentials are not configured' },
+        { status: 503 },
+      );
+    }
+
+    // Validate algorithm and derive unit strictly from MRR API v2 data.
+    const algos = await getAlgoInfoList();
+    const algoKey = toMrrAlgoName(algorithm);
+    const algoInfo = algos.find(a => a.name === algoKey || toMrrAlgoName(a.display) === algoKey);
+
+    if (!algoInfo) {
       return NextResponse.json(
         { success: false, error: `Unsupported algorithm: ${algorithm}` },
         { status: 400 },
       );
     }
 
+    const unit = algoInfo.unit ? `${algoInfo.unit}/s` : '';
+
     if (!Number.isFinite(hashrate) || hashrate <= 0 || !Number.isFinite(durationHours) || durationHours <= 0) {
       return NextResponse.json(
         { success: false, error: 'hashrate and durationHours must be positive finite numbers' },
-        { status: 400 },
-      );
-    }
-
-    // Enforce minimum hashrate floor per algorithm
-    const minHashrate = ALGORITHM_MIN_HASHRATE[algorithm];
-    if (minHashrate !== undefined && hashrate < minHashrate) {
-      return NextResponse.json(
-        { success: false, error: `Minimum hashrate for ${algorithm} is ${minHashrate} ${unit}` },
         { status: 400 },
       );
     }
@@ -135,4 +113,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: 'Failed to create package' }, { status: 500 });
   }
 }
-

@@ -7,7 +7,7 @@ A full-stack hashrate rental marketplace — like NiceHash and Mining Rig Rental
 - 🖥 **Modern dark UI** — responsive, gradient-accented design with animated elements
 - ⚡ **Dynamic hashrate packages** — build custom packages across SHA-256, Ethash, Scrypt, X11, RandomX with live pricing
 - 🔒 **Crypto-only checkout** — integrates with [NOWPayments](https://nowpayments.io) to accept BTC, ETH, LTC, XMR, USDT, USDC, SOL, BNB
-- ⛏ **Auto-provisioning** — on confirmed payment, automatically rents the best-priced rig from [Mining Rig Rentals API v2](https://www.miningrigrentals.com/apidoc/v2)
+- ⛏ **Auto-provisioning** — on confirmed payment, automatically rents the best-priced rig from [Mining Rig Rentals API v2](https://www.miningrigrentals.com/apidocv2)
 - 📦 **Order tracking** — real-time order status page with payment confirmation polling
 - 📧 **Transactional email** — order confirmations, active mining notifications, and expiry reminders via SMTP
 - 🗃 **Admin dashboard** — protected dashboard to view and filter all orders with links to MRR rentals and NOWPayments invoices

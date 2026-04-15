@@ -1,7 +1,7 @@
 'use client';
 
-import { Suspense, useState, useEffect, useCallback } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { Suspense, useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { Order } from '@/types';
 
@@ -11,6 +11,8 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: string
   active:              { label: 'Mining Active',      color: 'text-green-400',  icon: '⛏️', desc: 'Your miner is active and earning rewards.' },
   provisioning_failed: { label: 'Provisioning Failed',color: 'text-red-400',    icon: '❌', desc: 'We could not provision a miner. Please contact support.' },
   expired:             { label: 'Expired',            color: 'text-gray-500',   icon: '🕐', desc: 'This rental period has ended.' },
+  payment_expired:     { label: 'Payment Expired',    color: 'text-gray-500',   icon: '⌛', desc: 'The payment window has expired.' },
+  partially_paid:      { label: 'Partially Paid',     color: 'text-yellow-500', icon: '⚠️', desc: 'Partial payment received. Please top up to complete your order.' },
 };
 
 const PAYMENT_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
@@ -23,13 +25,38 @@ const PAYMENT_STATUS_CONFIG: Record<string, { label: string; color: string }> = 
   partially_paid: { label: 'Partially Paid', color: 'text-yellow-500' },
 };
 
+interface RentalStatus {
+  rentalId: string;
+  data: {
+    status?: string;
+    hashrate?: { hash?: number; type?: string };
+    start?: string;
+    end?: string;
+  } | null;
+  loading: boolean;
+}
+
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return '00:00:00';
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
+}
+
 function OrderContent() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [countdown, setCountdown] = useState<string>('');
+  const [rentalStatuses, setRentalStatuses] = useState<RentalStatus[]>([]);
+  const [renewing, setRenewing] = useState(false);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const successParam = searchParams.get('status');
 
@@ -58,11 +85,76 @@ function OrderContent() {
     return () => clearInterval(refreshInterval);
   }, [order, fetchOrder]);
 
+  // Live countdown for active orders
+  useEffect(() => {
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    if (order?.status === 'active' && order?.expires_at) {
+      const update = () => {
+        const ms = new Date(order.expires_at!).getTime() - Date.now();
+        setCountdown(formatCountdown(ms));
+      };
+      update();
+      countdownRef.current = setInterval(update, 1000);
+    }
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, [order?.status, order?.expires_at]);
+
+  // Fetch live rental statuses for active orders
+  useEffect(() => {
+    if (!order || order.status !== 'active') return;
+    const ids: string[] = [];
+    if (order.mrr_rental_ids) {
+      try { ids.push(...JSON.parse(order.mrr_rental_ids) as string[]); } catch { /* ignore */ }
+    } else if (order.mrr_rental_id) {
+      ids.push(order.mrr_rental_id);
+    }
+    if (!ids.length) return;
+
+    setRentalStatuses(ids.map(rid => ({ rentalId: rid, data: null, loading: true })));
+
+    ids.forEach(rid => {
+      fetch(`/api/rentals/${rid}`)
+        .then(r => r.json())
+        .then(d => {
+          setRentalStatuses(prev => prev.map(rs =>
+            rs.rentalId === rid
+              ? { ...rs, data: d.success ? d.data : null, loading: false }
+              : rs,
+          ));
+        })
+        .catch(() => {
+          setRentalStatuses(prev => prev.map(rs =>
+            rs.rentalId === rid ? { ...rs, loading: false } : rs,
+          ));
+        });
+    });
+  }, [order]);
+
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
+  };
+
+  const handleRenew = async () => {
+    if (!order) return;
+    setRenewing(true);
+    try {
+      const res = await fetch(`/api/orders/${order.id}/renew`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json() as { success: boolean; data?: { packageId: string }; error?: string };
+      if (!data.success || !data.data) throw new Error(data.error ?? 'Failed to create renewal');
+      router.push(`/checkout/${data.data.packageId}?currency=${order.payment_currency}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Renewal failed');
+    } finally {
+      setRenewing(false);
+    }
   };
 
   if (loading) {
@@ -88,7 +180,9 @@ function OrderContent() {
   const isActive = order.status === 'active';
   const expiresAt = order.expires_at ? new Date(order.expires_at) : null;
   const now = new Date();
-  const hoursLeft = expiresAt ? Math.max(0, (expiresAt.getTime() - now.getTime()) / 3_600_000) : null;
+  const msLeft = expiresAt ? expiresAt.getTime() - now.getTime() : null;
+  const hoursLeft = msLeft !== null ? Math.max(0, msLeft / 3_600_000) : null;
+  const showRenewCta = isActive && msLeft !== null && msLeft <= 2 * 3600_000;
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -108,6 +202,26 @@ function OrderContent() {
             <p className="text-green-400 font-semibold text-sm">Payment received!</p>
             <p className="text-gray-400 text-xs mt-0.5">Your miner has been provisioned and is now active.</p>
           </div>
+        </div>
+      )}
+
+      {/* Renewal CTA banner */}
+      {showRenewCta && (
+        <div className="mb-6 p-4 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">⏰</span>
+            <div>
+              <p className="text-orange-400 font-semibold text-sm">Rental Expiring Soon</p>
+              <p className="text-gray-400 text-xs mt-0.5">Renew now to keep mining without interruption.</p>
+            </div>
+          </div>
+          <button
+            onClick={handleRenew}
+            disabled={renewing}
+            className="px-4 py-2 bg-orange-500 hover:bg-orange-400 text-white font-semibold text-sm rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
+          >
+            {renewing ? 'Creating…' : 'Renew →'}
+          </button>
         </div>
       )}
 
@@ -145,19 +259,68 @@ function OrderContent() {
         {/* Active mining countdown */}
         {isActive && expiresAt && hoursLeft !== null && (
           <div className="p-5 rounded-xl bg-green-500/10 border border-green-500/20 mb-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
                 <p className="text-green-400 font-semibold text-sm">⛏️ Mining is active</p>
                 <p className="text-gray-400 text-xs mt-0.5">
                   Expires {expiresAt.toLocaleString()} ({hoursLeft.toFixed(1)}h remaining)
                 </p>
               </div>
-              {order.mrr_rental_id && (
-                <div className="text-right">
-                  <p className="text-gray-500 text-xs">Rental ID</p>
-                  <p className="text-gray-300 font-mono text-xs">{order.mrr_rental_id}</p>
-                </div>
-              )}
+              <div className="flex items-center gap-4">
+                {countdown && (
+                  <div className="text-right">
+                    <p className="text-gray-500 text-xs">Time left</p>
+                    <p className="text-white font-mono font-bold text-xl tabular-nums">{countdown}</p>
+                  </div>
+                )}
+                {order.mrr_rental_id && (
+                  <div className="text-right">
+                    <p className="text-gray-500 text-xs">Rental ID</p>
+                    <p className="text-gray-300 font-mono text-xs">{order.mrr_rental_id}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Live rental statuses (multi-rig) */}
+        {rentalStatuses.length > 0 && (
+          <div className="mb-6">
+            <h3 className="text-white font-semibold text-sm mb-3">Live Rental Status</h3>
+            <div className="overflow-x-auto rounded-xl border border-gray-800">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-800 text-gray-500">
+                    <th className="px-4 py-2 text-left font-medium">Rental ID</th>
+                    <th className="px-4 py-2 text-left font-medium">Status</th>
+                    <th className="px-4 py-2 text-left font-medium">Hashrate</th>
+                    <th className="px-4 py-2 text-left font-medium">Ends</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rentalStatuses.map(rs => (
+                    <tr key={rs.rentalId} className="border-b border-gray-800/50 last:border-0">
+                      <td className="px-4 py-2 font-mono text-gray-300">{rs.rentalId}</td>
+                      <td className="px-4 py-2">
+                        {rs.loading
+                          ? <span className="text-gray-500">Loading…</span>
+                          : <span className="text-green-400">{rs.data?.status ?? '–'}</span>
+                        }
+                      </td>
+                      <td className="px-4 py-2 text-gray-300">
+                        {rs.data?.hashrate
+                          ? `${rs.data.hashrate.hash ?? '–'} ${rs.data.hashrate.type ?? ''}`
+                          : '–'
+                        }
+                      </td>
+                      <td className="px-4 py-2 text-gray-400">
+                        {rs.data?.end ? new Date(rs.data.end).toLocaleString() : '–'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
@@ -203,6 +366,19 @@ function OrderContent() {
           </div>
         </div>
       </div>
+
+      {/* Renew button (always visible for active/expired) */}
+      {(order.status === 'active' || order.status === 'expired') && (
+        <div className="mb-6">
+          <button
+            onClick={handleRenew}
+            disabled={renewing}
+            className="w-full py-3 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold rounded-xl hover:from-orange-400 hover:to-yellow-400 transition-all shadow-lg shadow-orange-500/25 disabled:opacity-50"
+          >
+            {renewing ? 'Creating renewal…' : '↻ Renew This Rental'}
+          </button>
+        </div>
+      )}
 
       {/* Refresh + support */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">

@@ -10,6 +10,18 @@ export interface Package {
   popular: number;
 }
 
+export const ORDER_STATUSES = [
+  'pending',
+  'awaiting_payment',
+  'active',
+  'provisioning_failed',
+  'expired',
+  'payment_expired',
+  'partially_paid',
+] as const;
+
+export type OrderStatus = typeof ORDER_STATUSES[number];
+
 export interface Order {
   id: string;
   package_id: string;
@@ -26,9 +38,13 @@ export interface Order {
   payment_amount: number | null;
   payment_id: string | null;
   payment_status: string;
-  status: string;
+  status: OrderStatus | string;
   mrr_rental_id: string | null;
   mrr_rental_ids: string | null;
+  coin: string | null;
+  pool_id: string | null;
+  pool_url: string | null;
+  reminder_sent: number;
   expires_at: string | null;
   created_at: string;
   updated_at: string;

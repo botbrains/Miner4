@@ -62,7 +62,7 @@ function buildHeaders(endpoint: string, body: string = '') {
   };
 }
 
-async function mrrRequest<T>(
+export async function mrrRequest<T>(
   method: 'GET' | 'POST' | 'PUT',
   path: string,
   data?: unknown,
@@ -154,21 +154,52 @@ export interface MultiRigRentalResult {
   unit: string;
 }
 
+/**
+ * Retry a function up to `retries` times with exponential back-off.
+ * Delays between attempts: baseDelayMs, baseDelayMs*2, baseDelayMs*4, …
+ * Re-throws the last error when all retries are exhausted.
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries = 3,
+  baseDelayMs = 1_000,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, baseDelayMs * 2 ** attempt));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 /** Rent a rig for the specified duration. */
 export async function rentRig(
   rigId: number,
   durationHours: number,
   workerName: string,
   workerPassword = 'x',
+  pool?: { host: string; port: number; password?: string },
 ): Promise<RentalResult> {
   type Response = { success: boolean; data: { id: number; start: string; end: string } };
-  const payload = {
+  const payload: Record<string, unknown> = {
     rig_id: rigId,
     length: durationHours,
     unit: 'hours',
     worker: workerName,
     workerpass: workerPassword,
   };
+
+  if (pool) {
+    payload.pool_host = pool.host;
+    payload.pool_port = pool.port;
+    payload.pool_pass = pool.password ?? 'x';
+  }
 
   const res = await mrrRequest<Response>('PUT', '/rental', payload);
 
@@ -288,6 +319,7 @@ export async function provisionMiner(
   unit: string,
   durationHours: number,
   workerName: string,
+  pool?: { host: string; port: number; password?: string },
 ): Promise<MultiRigRentalResult | null> {
   const rigs = await getAvailableRigs(algorithm);
   if (!rigs.length) return null;
@@ -296,13 +328,14 @@ export async function provisionMiner(
   if (!chosenRigs) return null;
 
   // Rent all selected rigs sequentially (avoids MRR API nonce collisions).
-  // If any rental fails the whole provisioning attempt is aborted. Already-started
+  // Each individual rental is retried up to 3 times with exponential back-off.
+  // If any rental fails after all retries, provisioning is aborted. Already-started
   // rentals CANNOT be cancelled early via the MRR API – MRR rentals are fixed-duration
   // contracts. Already-started rental IDs are logged for support visibility.
   const rentals: RentalResult[] = [];
   for (const rig of chosenRigs) {
     try {
-      const rental = await rentRig(rig.id, durationHours, workerName);
+      const rental = await withRetry(() => rentRig(rig.id, durationHours, workerName, 'x', pool));
       rentals.push(rental);
     } catch (err) {
       if (rentals.length > 0) {

@@ -30,6 +30,8 @@ export interface ComputedPrice {
   btcUsdRate: number;
   availableRigs: number;
   keysConfigured: boolean;
+  /** Indicates which pricing path was used. */
+  source: 'algo-suggested' | 'rig-fallback' | 'unconfigured';
 }
 
  /**
@@ -54,7 +56,7 @@ export async function computePrice(
   const feeUsd = MINER4_FEE_USD;
 
   if (!hasMrrKeys()) {
-    return { totalUsd: 0, feeUsd, btcUsdRate: 0, availableRigs: 0, keysConfigured: false };
+    return { totalUsd: 0, feeUsd, btcUsdRate: 0, availableRigs: 0, keysConfigured: false, source: 'unconfigured' };
   }
 
   // Fetch the suggested algo price and BTC rate concurrently.
@@ -67,12 +69,14 @@ export async function computePrice(
 
   let mrrRatePerHashPerDay: number;
   let availableRigs = 0;
+  let source: ComputedPrice['source'] = 'algo-suggested';
 
   if (algoPrice && algoPrice.btcPerUnitPerDay > 0) {
     // Primary: use MRR's own server-side suggested price for the algorithm
     mrrRatePerHashPerDay = algoPrice.btcPerUnitPerDay;
   } else {
     // Fallback: derive minimum price from available rigs
+    source = 'rig-fallback';
     const rigs = await getAvailableRigs(algorithm);
     availableRigs = rigs.length;
 
@@ -107,5 +111,6 @@ export async function computePrice(
     btcUsdRate: +btcUsdRate.toFixed(2),
     availableRigs,
     keysConfigured: true,
+    source,
   };
 }

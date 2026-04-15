@@ -12,6 +12,8 @@ export interface PricingResult {
   btcUsdRate: number;
   availableRigs: number;
   keysConfigured: boolean;
+  /** Which pricing path was used. */
+  source: 'algo-suggested' | 'rig-fallback' | 'unconfigured';
 }
 
 export async function GET(req: Request) {
@@ -39,6 +41,7 @@ export async function GET(req: Request) {
       btcUsdRate:   price.btcUsdRate,
       availableRigs: price.availableRigs,
       keysConfigured: price.keysConfigured,
+      source:       price.source,
     };
 
     return NextResponse.json({ success: true, data: result });

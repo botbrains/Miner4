@@ -5,6 +5,10 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type { Package, PaymentInvoice } from '@/types';
 import { SUPPORTED_CURRENCIES, ALGORITHM_COLORS } from '@/types';
+import type { CoinConfig } from '@/config/coins';
+import { ALGORITHM_COINS } from '@/config/coins';
+import { CONFIRMATION_TIMES_MIN } from '@/config/confirmationTimes';
+import type { PoolConfig } from '@/config/pools';
 
 type CheckoutStep = 'details' | 'payment';
 
@@ -23,6 +27,12 @@ function CheckoutContent() {
   const [isAmountCopied, setIsAmountCopied] = useState(false);
   const [isAddressCopied, setIsAddressCopied] = useState(false);
 
+  // Coin / pool state
+  const [availableCoins, setAvailableCoins] = useState<CoinConfig[]>([]);
+  const [selectedCoin, setSelectedCoin] = useState<CoinConfig | null>(null);
+  const [availablePools, setAvailablePools] = useState<PoolConfig[]>([]);
+  const [selectedPool, setSelectedPool] = useState<PoolConfig | null>(null);
+
   // Pre-fill currency from query param (passed by packages builder)
   const initialCurrency = searchParams.get('currency') ?? 'btc';
 
@@ -32,25 +42,64 @@ function CheckoutContent() {
     workerName: '',
     paymentCurrency: initialCurrency,
   });
+  const [workerNameError, setWorkerNameError] = useState('');
 
-  // Fetch package
+  // Fetch package and validate it is not expired or already purchased
   useEffect(() => {
     if (!packageId) return;
     fetch(`/api/packages/${packageId}`)
       .then(r => r.json())
-      .then(d => {
-        setPkg(d.data);
+      .then(async (d) => {
+        if (!d.data) {
+          router.replace('/packages?error=expired');
+          return;
+        }
+        const p = d.data as Package;
+        // Check if the package was created more than 24 hours ago
+        const createdAt = new Date((p as unknown as { created_at: string }).created_at);
+        if (Date.now() - createdAt.getTime() > 24 * 3600_000) {
+          router.replace('/packages?error=expired');
+          return;
+        }
+        setPkg(p);
+
+        // Derive coins and pools for this algorithm
+        const coins = ALGORITHM_COINS[p.algorithm] ?? [];
+        setAvailableCoins(coins);
+        setSelectedCoin(coins[0] ?? null);
+
+        // Fetch available pools
+        try {
+          const poolsRes = await fetch(`/api/pools?algorithm=${encodeURIComponent(p.algorithm)}`);
+          const poolsData = await poolsRes.json() as { success: boolean; data: PoolConfig[] };
+          if (poolsData.success && poolsData.data.length > 0) {
+            setAvailablePools(poolsData.data);
+            setSelectedPool(poolsData.data[0]);
+          }
+        } catch { /* pools are optional */ }
+
         setLoading(false);
       })
       .catch(() => {
         setLoading(false);
         setError('Package not found.');
       });
-  }, [packageId]);
+  }, [packageId, router]);
 
   const handleSubmitDetails = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pkg) return;
+
+    // Client-side coin address validation
+    if (selectedCoin && form.workerName) {
+      if (!selectedCoin.addressRe.test(form.workerName.split('.')[0])) {
+        // Soft warning – some users may not include address in workerName
+        setWorkerNameError(`Note: address may not be a valid ${selectedCoin.coin} address. Verify before proceeding.`);
+      } else {
+        setWorkerNameError('');
+      }
+    }
+
     setSubmitting(true);
     setError(null);
 
@@ -64,6 +113,9 @@ function CheckoutContent() {
           email: form.email,
           workerName: form.workerName,
           paymentCurrency: form.paymentCurrency,
+          coin: selectedCoin?.coin,
+          poolId: selectedPool?.name,
+          poolUrl: selectedPool?.host,
         }),
       });
       const orderData = await orderRes.json();
@@ -88,7 +140,7 @@ function CheckoutContent() {
     } finally {
       setSubmitting(false);
     }
-  }, [pkg, form]);
+  }, [pkg, form, selectedCoin, selectedPool]);
 
   const handleCopyAmount = useCallback((text: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -107,6 +159,8 @@ function CheckoutContent() {
   const handleConfirmed = useCallback(() => {
     if (orderId) router.push(`/order/${orderId}`);
   }, [orderId, router]);
+
+  const confirmationTime = CONFIRMATION_TIMES_MIN[form.paymentCurrency];
 
   if (loading) {
     return (
@@ -184,20 +238,71 @@ function CheckoutContent() {
                   <p className="text-gray-500 text-xs mt-1">Order confirmation will be sent here.</p>
                 </div>
 
+                {/* Coin selector */}
+                {availableCoins.length > 0 && (
+                  <div>
+                    <label className="block text-gray-300 text-sm font-medium mb-2">Mine Which Coin?</label>
+                    <div className="flex flex-wrap gap-2">
+                      {availableCoins.map(c => (
+                        <button
+                          key={c.coin}
+                          type="button"
+                          onClick={() => setSelectedCoin(c)}
+                          className={`px-4 py-2 rounded-lg border text-sm font-semibold transition-all
+                            ${selectedCoin?.coin === c.coin
+                              ? 'border-orange-500 bg-orange-500/10 text-orange-400'
+                              : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600 hover:text-white'
+                            }`}
+                        >
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div>
-                  <label className="block text-gray-300 text-sm font-medium mb-2">Worker / Stratum Username</label>
+                  <label className="block text-gray-300 text-sm font-medium mb-2">
+                    Worker / Stratum Username
+                    {selectedCoin && <span className="text-gray-500 font-normal ml-1">({selectedCoin.coin} payout address)</span>}
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="your_wallet_address.worker1"
+                    placeholder={selectedCoin ? `${selectedCoin.coin.toLowerCase()}_address.worker1` : 'your_wallet_address.worker1'}
                     value={form.workerName}
-                    onChange={e => setForm(f => ({ ...f, workerName: e.target.value }))}
+                    onChange={e => { setForm(f => ({ ...f, workerName: e.target.value })); setWorkerNameError(''); }}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 text-sm font-mono focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-colors"
                   />
-                  <p className="text-gray-500 text-xs mt-1">
-                    Your pool username — typically <code className="text-gray-400">walletAddress.workerName</code>.
-                  </p>
+                  {workerNameError ? (
+                    <p className="text-yellow-400 text-xs mt-1">{workerNameError}</p>
+                  ) : (
+                    <p className="text-gray-500 text-xs mt-1">
+                      Your pool username — typically <code className="text-gray-400">walletAddress.workerName</code>.
+                    </p>
+                  )}
                 </div>
+
+                {/* Pool selector */}
+                {availablePools.length > 0 && (
+                  <div>
+                    <label className="block text-gray-300 text-sm font-medium mb-2">Solo Mining Pool</label>
+                    <select
+                      value={selectedPool?.name ?? ''}
+                      onChange={e => {
+                        const p = availablePools.find(p => p.name === e.target.value);
+                        setSelectedPool(p ?? null);
+                      }}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-colors"
+                    >
+                      {availablePools.map(p => (
+                        <option key={p.name} value={p.name}>
+                          {p.name} — {p.host}:{p.port}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-gray-300 text-sm font-medium mb-2">Pay With</label>
@@ -218,6 +323,12 @@ function CheckoutContent() {
                       </button>
                     ))}
                   </div>
+                  {/* Confirmation time estimate */}
+                  {confirmationTime !== undefined && (
+                    <p className="text-gray-500 text-xs mt-2">
+                      ⏱ Mining typically starts in ~{confirmationTime < 1 ? `${confirmationTime * 60} sec` : `${confirmationTime} min`} after payment (estimate)
+                    </p>
+                  )}
                 </div>
 
                 <button
@@ -282,6 +393,16 @@ function CheckoutContent() {
                 <p className="text-white font-mono text-sm break-all leading-relaxed">{invoice.payAddress}</p>
               </div>
 
+              {/* Confirmation time estimate */}
+              {confirmationTime !== undefined && (
+                <div className="flex gap-3 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 mb-5">
+                  <span className="text-blue-400 text-sm">⏱</span>
+                  <p className="text-blue-300 text-xs leading-relaxed">
+                    Mining typically starts in ~{confirmationTime < 1 ? `${confirmationTime * 60} sec` : `${confirmationTime} min`} after payment confirmation (estimate).
+                  </p>
+                </div>
+              )}
+
               {/* Warning */}
               <div className="flex gap-3 p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20 mb-8">
                 <svg className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -332,6 +453,18 @@ function CheckoutContent() {
                 <span className="text-gray-500">Algorithm</span>
                 <span className="text-white font-semibold">{pkg.algorithm}</span>
               </div>
+              {selectedCoin && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Mine</span>
+                  <span className="text-white font-semibold">{selectedCoin.coin}</span>
+                </div>
+              )}
+              {selectedPool && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Pool</span>
+                  <span className="text-white font-semibold text-xs truncate max-w-[120px]">{selectedPool.host}</span>
+                </div>
+              )}
               {invoice && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Pay with</span>

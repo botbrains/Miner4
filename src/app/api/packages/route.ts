@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { computePrice } from '@/lib/pricing';
 import { randomUUID } from 'crypto';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,18 @@ const ALGORITHM_UNIT_MAP: Record<string, string> = {
   'Scrypt':  'MH/s',
   'X11':     'GH/s',
   'RandomX': 'KH/s',
+};
+
+/**
+ * Minimum allowed hashrate per algorithm (in the algorithm's native unit).
+ * Requests below the floor are rejected with HTTP 400.
+ */
+const ALGORITHM_MIN_HASHRATE: Record<string, number> = {
+  'SHA-256': 1,
+  'Ethash':  100,
+  'Scrypt':  100,
+  'X11':     1,
+  'RandomX': 1000,
 };
 
 export async function GET() {
@@ -41,6 +54,18 @@ interface CreatePackageBody {
 
 /** Create a dynamic package record from user-configured hashrate + live pricing. */
 export async function POST(req: Request) {
+  // Rate-limit: 10 requests per minute per IP
+  const forwarded = req.headers.get('x-forwarded-for');
+  const ip = forwarded ? forwarded.split(',')[0].trim() : 'unknown';
+  const rl = checkRateLimit(ip);
+  if (!rl.allowed) {
+    const retryAfterSec = Math.ceil(rl.retryAfterMs / 1000);
+    return NextResponse.json(
+      { success: false, error: 'Too many requests. Please wait before trying again.' },
+      { status: 429, headers: { 'Retry-After': String(retryAfterSec) } },
+    );
+  }
+
   try {
     const body: CreatePackageBody = await req.json();
     const { algorithm, hashrate, durationHours } = body;
@@ -64,6 +89,15 @@ export async function POST(req: Request) {
     if (!Number.isFinite(hashrate) || hashrate <= 0 || !Number.isFinite(durationHours) || durationHours <= 0) {
       return NextResponse.json(
         { success: false, error: 'hashrate and durationHours must be positive finite numbers' },
+        { status: 400 },
+      );
+    }
+
+    // Enforce minimum hashrate floor per algorithm
+    const minHashrate = ALGORITHM_MIN_HASHRATE[algorithm];
+    if (minHashrate !== undefined && hashrate < minHashrate) {
+      return NextResponse.json(
+        { success: false, error: `Minimum hashrate for ${algorithm} is ${minHashrate} ${unit}` },
         { status: 400 },
       );
     }

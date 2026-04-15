@@ -45,6 +45,9 @@ export interface Order {
   coin: string | null;
   pool_id: string | null;
   pool_url: string | null;
+  pool_host: string | null;
+  pool_port: number | null;
+  pool_pass: string | null;
   reminder_sent: number | null;
   expires_at: string | null;
   created_at: string;

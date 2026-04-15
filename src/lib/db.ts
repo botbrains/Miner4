@@ -88,6 +88,10 @@ function initSchema(db: Database.Database) {
   // pool_id / pool_url: solo mining pool chosen at checkout
   addColumnIfMissing(db, 'orders', 'pool_id', 'TEXT');
   addColumnIfMissing(db, 'orders', 'pool_url', 'TEXT');
+  // pool_host / pool_port / pool_pass: normalized stratum settings used during provisioning
+  addColumnIfMissing(db, 'orders', 'pool_host', 'TEXT');
+  addColumnIfMissing(db, 'orders', 'pool_port', 'INTEGER');
+  addColumnIfMissing(db, 'orders', 'pool_pass', 'TEXT');
 
   // reminder_sent: 1 once the 1-hour-before-expiry reminder email has been sent
   addColumnIfMissing(db, 'orders', 'reminder_sent', 'INTEGER DEFAULT 0');

@@ -35,8 +35,18 @@ a confirmed, active rental.
       to the order
 - [ ] Validate that the package has not already expired or been purchased before
       showing the checkout page (guard against stale package IDs in deep links)
-- [ ] Support custom worker password field at checkout (currently hardcoded
-      to `'x'` in `rentRig`)
+- [ ] Coin selection at checkout – let the user pick which coin to mine from
+      those mineable with the selected algorithm (e.g., Bitcoin vs. Bitcoin Cash
+      for SHA-256). The chosen coin must determine the address format validation
+      applied to the worker/payout address field, and the `worker` field sent to
+      MRR must be set to a valid address for that coin so payouts are credited to
+      the correct wallet.
+- [ ] Solo mining pool selection at checkout – present a curated list of solo
+      mining pools compatible with the selected algorithm (populated from a
+      server-side config or `GET /api/pools?algorithm=<algo>`). The chosen pool's
+      Stratum URL must be sent to MRR as the rental pool config, overriding any
+      default pool. A sensible default pool should be pre-selected so this field
+      remains optional for most users.
 - [ ] Minimum hashrate floor enforcement per algorithm at the API level
       (currently only enforced by the UI slider)
 - [ ] Show estimated mining start time at checkout (based on average payment

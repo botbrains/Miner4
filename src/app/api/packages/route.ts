@@ -1,36 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { computePrice } from '@/lib/pricing';
+import { ALGORITHM_UNIT_MAP, ALGORITHM_MIN_HASHRATE } from '@/lib/algorithmConfig';
 import { randomUUID } from 'crypto';
 import { checkRateLimit } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
-
-/**
- * Server-authoritative map of algorithm → hashrate unit.
- * The client may suggest an algorithm name but unit is always derived here,
- * so a malformed/spoofed unit cannot affect provisioning.
- * Algorithms not present in this map are rejected with HTTP 400.
- */
-const ALGORITHM_UNIT_MAP: Record<string, string> = {
-  'SHA-256': 'TH/s',
-  'Ethash':  'MH/s',
-  'Scrypt':  'MH/s',
-  'X11':     'GH/s',
-  'RandomX': 'KH/s',
-};
-
-/**
- * Minimum allowed hashrate per algorithm (in the algorithm's native unit).
- * Requests below the floor are rejected with HTTP 400.
- */
-const ALGORITHM_MIN_HASHRATE: Record<string, number> = {
-  'SHA-256': 1,
-  'Ethash':  100,
-  'Scrypt':  100,
-  'X11':     1,
-  'RandomX': 1000,
-};
 
 export async function GET() {
   try {
@@ -105,7 +80,7 @@ export async function POST(req: Request) {
     // Compute the authoritative price entirely on the server.
     let priceUsd: number;
     try {
-      const price = await computePrice(algorithm, hashrate, durationHours);
+      const price = await computePrice(algorithm, hashrate, durationHours, unit);
       if (!price.keysConfigured) {
         return NextResponse.json(
           { success: false, error: 'Pricing service is not configured' },

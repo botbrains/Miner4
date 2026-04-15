@@ -65,7 +65,7 @@ const ALGORITHMS: Array<{
   { id: 'Ethash',   label: 'Ethash',   coin: 'Ethereum Classic (ETC)', unit: 'MH/s', min: 100, max: 10000, step: 100, default: 1000 },
   { id: 'Scrypt',   label: 'Scrypt',   coin: 'Litecoin (LTC)',   unit: 'MH/s', min: 100, max: 5000, step: 100, default: 500  },
   { id: 'X11',      label: 'X11',      coin: 'Dash (DASH)',      unit: 'GH/s', min: 1,   max: 100,  step: 1,   default: 10   },
-  { id: 'RandomX',  label: 'RandomX',  coin: 'Monero (XMR)',     unit: 'KH/s', min: 10,  max: 500,  step: 10,  default: 100  },
+  { id: 'RandomX',  label: 'RandomX',  coin: 'Monero (XMR)',     unit: 'KH/s', min: 1_000,  max: 100_000, step: 1_000,  default: 10_000 },
 ];
 
 const DURATIONS = [

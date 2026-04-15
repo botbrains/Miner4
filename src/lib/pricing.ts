@@ -6,6 +6,44 @@
 
 import { getAvailableRigs, getAlgoSuggestedPrice, hasMrrKeys } from '@/lib/mrr';
 
+// ---------------------------------------------------------------------------
+// Hash-unit conversion
+// ---------------------------------------------------------------------------
+
+/** Scale factors relative to the base hash unit (H). */
+const UNIT_SCALE: Record<string, number> = {
+  'h':  1,
+  'kh': 1_000,
+  'mh': 1_000_000,
+  'gh': 1_000_000_000,
+  'th': 1_000_000_000_000,
+  'ph': 1_000_000_000_000_000,
+};
+
+/** Normalise a hash-unit string to a lowercase key matching UNIT_SCALE. */
+function normalizeHashUnit(unit: string): string {
+  return unit.toLowerCase().replace(/\/s$/, '').replace(/\/$/, '');
+}
+
+/**
+ * Convert a hashrate value from one hash unit to another.
+ *
+ * Example: convertHashrate(1, 'TH/s', 'GH') → 1000
+ * (1 TH = 1000 GH, so 1 TH/s expressed in GH is 1000)
+ *
+ * Returns the original value unchanged when either unit is unknown or when
+ * both units are the same after normalisation.
+ */
+export function convertHashrate(hashrate: number, fromUnit: string, toUnit: string): number {
+  const fromKey = normalizeHashUnit(fromUnit);
+  const toKey   = normalizeHashUnit(toUnit);
+  if (fromKey === toKey) return hashrate;
+  const fromScale = UNIT_SCALE[fromKey];
+  const toScale   = UNIT_SCALE[toKey];
+  if (!fromScale || !toScale) return hashrate;
+  return hashrate * (fromScale / toScale);
+}
+
 export const MINER4_FEE_USD = 1.99;
 const MARKUP_MULTIPLIER     = 1.13;   // internal only—never exposed to clients
 
@@ -39,12 +77,25 @@ export interface ComputedPrice {
  * server.  Never accepts a price from the client.
  *
  * Pricing strategy (MRR API v2):
- * 1. Primary:  use GET /info/algos to get the MRR-suggested price for the
- *    algorithm — this is the server-side pricing endpoint recommended by MRR.
+ * 1. Primary:  use GET /info/algos/[NAME] to get the MRR-suggested price for
+ *    the algorithm — this is the server-side pricing endpoint recommended by
+ *    MRR.  The response also provides the authoritative hash unit so the
+ *    hashrate is always expressed in the same unit as the quoted price.
  *    This is fetched in parallel with the BTC/USD rate.
- * 2. Fallback: only if /info/algos returns no usable price, call GET /rig to
- *    derive the minimum price from available rigs. The rig-listing call is
- *    deferred to this path so it is never made when /info/algos succeeds.
+ * 2. Fallback: only if /info/algos/[NAME] returns no usable price, call
+ *    GET /rig?type=[NAME] to derive the minimum price from available rigs.
+ *    The authoritative unit is taken from hashrate.advertised.type on the
+ *    returned rig records (identical structure to the main rig list).
+ *    The rig-listing call is deferred so it is never made when the primary
+ *    path succeeds.
+ *
+ * @param algorithm    Internal algorithm name (e.g. 'SHA-256').
+ * @param hashrate     Requested hashrate expressed in `unit`.
+ * @param durationHours Rental duration in hours.
+ * @param unit         Hashrate unit from the caller (e.g. 'TH/s', 'KH/s').
+ *                     When supplied, the hashrate is automatically converted
+ *                     to MRR's authoritative unit before computing cost so
+ *                     any unit-scale mismatch is corrected transparently.
  *
  * @throws if MRR keys are configured but no pricing data is available.
  */
@@ -52,6 +103,7 @@ export async function computePrice(
   algorithm: string,
   hashrate: number,
   durationHours: number,
+  unit?: string,
 ): Promise<ComputedPrice> {
   const feeUsd = MINER4_FEE_USD;
 
@@ -61,7 +113,7 @@ export async function computePrice(
 
   // Fetch the suggested algo price and BTC rate concurrently.
   // The rig-listing call is intentionally deferred to the fallback path
-  // to avoid the overhead of a heavy /rig request when /info/algos succeeds.
+  // to avoid the overhead of a heavy /rig request when /info/algos/[NAME] succeeds.
   const [algoPrice, btcUsdRate] = await Promise.all([
     getAlgoSuggestedPrice(algorithm),
     getBtcUsdRate(),
@@ -71,17 +123,36 @@ export async function computePrice(
   let availableRigs = 0;
   let source: ComputedPrice['source'] = 'algo-suggested';
 
+  // Effective hashrate in MRR's authoritative unit.  Starts as the caller's
+  // value and is scaled when the caller's unit differs from MRR's unit.
+  let hashrateInMrrUnits = hashrate;
+
   if (algoPrice && algoPrice.btcPerUnitPerDay > 0) {
-    // Primary: use MRR's own server-side suggested price for the algorithm
+    // Primary: use MRR's own server-side suggested price from /info/algos/[NAME].
+    // Convert the caller's hashrate to the unit MRR used when quoting the price
+    // so the multiplication is dimensionally correct.
     mrrRatePerHashPerDay = algoPrice.btcPerUnitPerDay;
+    if (unit && algoPrice.unit) {
+      hashrateInMrrUnits = convertHashrate(hashrate, unit, algoPrice.unit);
+    }
   } else {
-    // Fallback: derive minimum price from available rigs
+    // Fallback: derive minimum price from available rigs via GET /rig?type=[NAME].
+    // The rig records are identical in structure to the main rig list and include
+    // hashrate.advertised.type — the authoritative MRR unit for this algorithm.
     source = 'rig-fallback';
     const rigs = await getAvailableRigs(algorithm);
     availableRigs = rigs.length;
 
     if (!rigs.length) {
       throw new Error(`No available rigs found for algorithm: ${algorithm}`);
+    }
+
+    // Derive the authoritative unit from the first rig's advertised hashrate type.
+    // selectRigsForHashrate already filters by unit match, so all rigs here share
+    // the same unit.
+    const rigUnit = rigs[0].hashrate?.advertised?.type ?? '';
+    if (unit && rigUnit) {
+      hashrateInMrrUnits = convertHashrate(hashrate, unit, rigUnit);
     }
 
     const prices = rigs
@@ -101,7 +172,7 @@ export async function computePrice(
   }
 
   const durationDays  = durationHours / 24;
-  const mrrCostBtc    = mrrRatePerHashPerDay * hashrate * durationDays;
+  const mrrCostBtc    = mrrRatePerHashPerDay * hashrateInMrrUnits * durationDays;
   const mrrCostUsd    = mrrCostBtc * btcUsdRate;
   const totalUsd      = +(mrrCostUsd * MARKUP_MULTIPLIER + feeUsd).toFixed(2);
 

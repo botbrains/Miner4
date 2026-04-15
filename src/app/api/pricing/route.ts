@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { computePrice } from '@/lib/pricing';
+import { ALGORITHM_UNIT_MAP } from '@/lib/algorithmConfig';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,8 @@ export async function GET(req: Request) {
   }
 
   try {
-    const price = await computePrice(algorithm, hashrate, durationHours);
+    const unit          = ALGORITHM_UNIT_MAP[algorithm];
+    const price = await computePrice(algorithm, hashrate, durationHours, unit);
 
     const result: PricingResult = {
       algorithm,

@@ -447,27 +447,46 @@ export async function hasMrrDepositSince(afterIso: string): Promise<boolean> {
 }
 
 /**
- * Suggested price for a single algorithm as returned by GET /info/algos.
- * This is the MRR-authoritative server-side price used as the primary pricing source.
+ * Suggested price and live statistics for a single algorithm as returned by
+ * GET /info/algos/[NAME].
+ * This is the MRR-authoritative server-side price used as the primary pricing
+ * source.
  */
 export interface MrrAlgoSuggestedPrice {
   /** MRR algorithm name (e.g. 'sha256') */
   name: string;
   /** Suggested price in BTC per hash-unit per day (e.g. 0.00001500 BTC/TH/day) */
   btcPerUnitPerDay: number;
-  /** Hash unit as returned by MRR (e.g. 'TH', 'MH') */
+  /**
+   * Hash unit as returned by MRR's suggested_price.unit (e.g. 'TH', 'MH').
+   * This is the authoritative unit to use when computing cost:
+   *   cost = btcPerUnitPerDay × hashrate_in_this_unit × duration_days
+   */
   unit: string;
+  /** Live stats from GET /info/algos/[NAME] */
+  stats: {
+    /** Number of rigs currently available/rented for this algorithm */
+    count: number;
+    /** Total hashrate currently rented across all rigs */
+    rentedHash: number;
+    /** Hash unit for rentedHash (mirrors `unit` above) */
+    rentedHashUnit: string;
+    /** Last recorded rental price in BTC per unit per day */
+    lastPrice: number;
+  } | null;
 }
 
 /**
- * Fetch the MRR-suggested price for a specific algorithm via GET /info/algos.
+ * Fetch the MRR-suggested price and live statistics for a specific algorithm
+ * via GET /info/algos/[NAME].
  *
- * This endpoint is the recommended server-side pricing source in MRR API v2:
- * it returns the current suggested rental price per hash unit per day for each
- * algorithm without requiring a full rig listing.
+ * Using the per-algorithm endpoint is more efficient than fetching all
+ * algorithms: only one record is returned and it includes richer stats
+ * (suggested price, unit, current rented hashrate, last price) that are
+ * used to ensure the pricing calculation uses MRR's authoritative unit.
  *
- * Returns null when the algorithm is not found, pricing data is unavailable, or
- * the request fails (so callers can fall back to rig-based pricing).
+ * Returns null when the algorithm is not found, pricing data is unavailable,
+ * or the request fails (so callers can fall back to rig-based pricing).
  */
 export async function getAlgoSuggestedPrice(algorithm: string): Promise<MrrAlgoSuggestedPrice | null> {
   const mrrAlgo = toMrrAlgoName(algorithm);
@@ -480,22 +499,29 @@ export async function getAlgoSuggestedPrice(algorithm: string): Promise<MrrAlgoS
       currency?: string;
       unit?: string;
     };
+    stats?: {
+      count?: number | string;
+      /** Total rented hashrate */
+      amount?: number | string;
+      unit?: string;
+      /** Last rental price in BTC per unit per day */
+      last?: number | string;
+    };
   };
 
-  type AlgosResponse = {
+  type AlgoResponse = {
     success: boolean;
-    data: AlgoEntry[] | { records?: AlgoEntry[] };
+    data: AlgoEntry;
   };
 
   try {
-    const res = await mrrRequest<AlgosResponse>('GET', '/info/algos');
-    if (!res.success) return null;
+    const res = await mrrRequest<AlgoResponse>(
+      'GET',
+      `/info/algos/${encodeURIComponent(mrrAlgo)}`,
+    );
+    if (!res.success || !res.data) return null;
 
-    const records: AlgoEntry[] = Array.isArray(res.data)
-      ? res.data
-      : ((res.data as { records?: AlgoEntry[] }).records ?? []);
-
-    const entry = records.find(a => a.name === mrrAlgo);
+    const entry = res.data;
     if (!entry?.suggested_price) return null;
 
     const amount = parseNum(entry.suggested_price.amount);
@@ -503,7 +529,21 @@ export async function getAlgoSuggestedPrice(algorithm: string): Promise<MrrAlgoS
 
     if (!Number.isFinite(amount) || amount <= 0) return null;
 
-    return { name: mrrAlgo, btcPerUnitPerDay: amount, unit };
+    // Parse live stats when present
+    let stats: MrrAlgoSuggestedPrice['stats'] = null;
+    if (entry.stats) {
+      const count      = parseNum(entry.stats.count);
+      const rentedHash = parseNum(entry.stats.amount);
+      const lastPrice  = parseNum(entry.stats.last);
+      stats = {
+        count:          Number.isFinite(count)      ? count      : 0,
+        rentedHash:     Number.isFinite(rentedHash) ? rentedHash : 0,
+        rentedHashUnit: entry.stats.unit ?? unit,
+        lastPrice:      Number.isFinite(lastPrice)  ? lastPrice  : 0,
+      };
+    }
+
+    return { name: mrrAlgo, btcPerUnitPerDay: amount, unit, stats };
   } catch {
     // Non-fatal: caller should fall back to rig-based pricing
     return null;

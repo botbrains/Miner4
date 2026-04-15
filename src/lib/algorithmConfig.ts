@@ -4,14 +4,14 @@
  * values are always in sync.
  *
  * Units match what Mining Rig Rentals returns in:
- *   • GET /info/algos  → suggested_price.unit  (primary pricing source)
- *   • GET /rig?type=… → hashrate.advertised.type  (rig-based fallback)
+ *   • GET /info/algos/[NAME]  → suggested_price.unit  (primary pricing source)
+ *   • GET /rig?type=…         → hashrate.advertised.type  (rig-based fallback)
  */
 
 /**
  * Maps each supported algorithm to the hashrate unit used by MRR and
- * displayed to customers.  The trailing "/s" is cosmetic – MRR strips it
- * when comparing units (see normalizeUnit in mrr.ts).
+ * displayed to customers.  The trailing "/s" is cosmetic – convertHashrate
+ * in src/lib/pricing.ts normalises it away when converting between units.
  */
 export const ALGORITHM_UNIT_MAP: Record<string, string> = {
   'SHA-256': 'TH/s',

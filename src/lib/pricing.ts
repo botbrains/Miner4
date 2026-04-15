@@ -13,16 +13,17 @@ import { getAvailableRigs, getAlgoSuggestedPrice, hasMrrKeys } from '@/lib/mrr';
 /** Scale factors relative to the base hash unit (H). */
 const UNIT_SCALE: Record<string, number> = {
   'h':  1,
-  'kh': 1_000,
-  'mh': 1_000_000,
-  'gh': 1_000_000_000,
-  'th': 1_000_000_000_000,
-  'ph': 1_000_000_000_000_000,
+  'kh': 1e3,
+  'mh': 1e6,
+  'gh': 1e9,
+  'th': 1e12,
+  'ph': 1e15,
 };
 
 /** Normalise a hash-unit string to a lowercase key matching UNIT_SCALE. */
 function normalizeHashUnit(unit: string): string {
-  return unit.toLowerCase().replace(/\/s$/, '').replace(/\/$/, '');
+  // Strip a trailing "/s" or "/" (e.g. "TH/s" → "th", "KH/" → "kh")
+  return unit.toLowerCase().replace(/\/s?$/, '');
 }
 
 /**

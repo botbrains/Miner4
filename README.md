@@ -9,17 +9,22 @@ A full-stack hashrate rental marketplace — like NiceHash and Mining Rig Rental
 - 🔒 **Crypto-only checkout** — integrates with [NOWPayments](https://nowpayments.io) to accept BTC, ETH, LTC, XMR, USDT, USDC, SOL, BNB
 - ⛏ **Auto-provisioning** — on confirmed payment, automatically rents the best-priced rig from [Mining Rig Rentals API v2](https://www.miningrigrentals.com/apidoc/v2)
 - 📦 **Order tracking** — real-time order status page with payment confirmation polling
+- 📧 **Transactional email** — order confirmations, active mining notifications, and expiry reminders via SMTP
+- 🗃 **Admin dashboard** — protected dashboard to view and filter all orders with links to MRR rentals and NOWPayments invoices
+- 🛡 **Security built-in** — server-side pricing, webhook signature verification, CSRF protection, rate limiting on package creation
 - 🗄 **Embedded SQLite** — zero-config database, no external services required
 
 ## Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Next.js 16 (App Router) |
+| Framework | Next.js 16.2 (App Router) |
 | Styling | Tailwind CSS v4 |
 | Database | SQLite via `better-sqlite3` |
 | Payments | NOWPayments API |
 | Mining | Mining Rig Rentals API v2 |
+| Email | Nodemailer (SMTP) |
+| Testing | Vitest |
 
 ## Pages
 
@@ -28,21 +33,38 @@ A full-stack hashrate rental marketplace — like NiceHash and Mining Rig Rental
 | `/` | Landing page with hero, algorithm cards, how-it-works, FAQ |
 | `/packages` | Interactive hashrate builder (algorithm, hashrate slider, duration, currency) |
 | `/checkout/[packageId]` | Two-step checkout: enter details → pay with crypto |
-| `/order/[id]` | Order status & payment tracking (auto-refreshes) |
+| `/order/[id]` | Order status & payment tracking (auto-refreshes every 15 s) |
+| `/orders` | Customer order lookup by order ID |
+| `/admin` | Admin dashboard — view, filter, and manage all orders (requires login) |
+| `/admin/login` | Admin login page |
 
 ## API Routes
 
+### Public
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/pricing` | GET | Live price from MRR market data |
-| `/api/packages` | GET | List all hashrate packages |
-| `/api/packages` | POST | Create a dynamic package with computed price |
+| `/api/pricing` | GET | Live price estimate from MRR market data |
+| `/api/packages` | GET | List all packages |
+| `/api/packages` | POST | Create a dynamic package (rate-limited: 10 req/min per IP) |
 | `/api/packages/[id]` | GET | Get a single package |
 | `/api/orders` | POST | Create an order |
 | `/api/orders/[id]` | GET | Get order status |
 | `/api/payments/create` | POST | Create a NOWPayments invoice |
-| `/api/payments/webhook` | POST | Handle payment confirmation & auto-provision miner |
-| `/api/mrr` | GET | Proxy live price data from Mining Rig Rentals |
+| `/api/payments/webhook` | POST | NOWPayments IPN handler — confirms payment and provisions miner |
+| `/api/mrr` | GET | Proxy live market data from Mining Rig Rentals |
+| `/api/pools` | GET | List curated solo mining pools (filter by `?algorithm=`) |
+| `/api/rentals/[rentalId]` | GET | Fetch live MRR rental status (60 s cache) |
+| `/api/health` | GET | Connectivity check for MRR, NOWPayments, and SQLite |
+
+### Admin (require `X-Admin-Key` header matching `ADMIN_API_KEY`)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/login` | POST | Exchange credentials for a session cookie |
+| `/api/orders` | GET | Paginated order listing with optional filters (`status`, `email`, `from`, `to`) |
+| `/api/cron/expire-orders` | POST | Expire overdue orders, delete stale packages, record pricing snapshots |
+| `/api/cron/expiry-reminders` | POST | Send expiry reminder emails for orders expiring within the next hour |
 
 ## Quick Start
 
@@ -54,7 +76,7 @@ npm install
 
 # 2. Configure environment
 cp .env.example .env.local
-# Edit .env.local with your MRR and NOWPayments API keys
+# Edit .env.local — see Environment Variables below
 
 # 3. Run in development
 npm run dev
@@ -65,26 +87,124 @@ npm run build && npm start
 
 ## Environment Variables
 
-Copy `.env.example` to `.env.local` and fill in your API keys:
+Copy `.env.example` to `.env.local` and fill in the values below.
+
+### Mining Rig Rentals
 
 ```env
-MRR_API_KEY=            # Mining Rig Rentals API key
-MRR_API_SECRET=         # Mining Rig Rentals API secret
-NOWPAYMENTS_API_KEY=    # NOWPayments API key
-NOWPAYMENTS_IPN_SECRET= # NOWPayments IPN secret for webhook verification
-NEXT_PUBLIC_BASE_URL=   # Your production URL (for webhook callbacks)
-# Also accepted as BASE_URL for server-side-only use
-BASE_URL=               # Optional server-side-only base URL
+MRR_API_KEY=        # API key from https://www.miningrigrentals.com/account/apikey
+MRR_API_SECRET=     # API secret from the same page
 ```
 
-> **Demo mode**: The app works without API keys — payments and miner provisioning are simulated for development.
+### NOWPayments
+
+```env
+NOWPAYMENTS_API_KEY=    # API key from https://nowpayments.io/account
+NOWPAYMENTS_IPN_SECRET= # IPN secret for webhook signature verification
+```
+
+### Base URL
+
+The base URL is used to build callback URLs for NOWPayments webhooks.
+
+```env
+NEXT_PUBLIC_BASE_URL=https://yourdomain.com  # Exposed to the browser (used in client-side code)
+BASE_URL=https://yourdomain.com              # Server-side only (takes priority over NEXT_PUBLIC_BASE_URL)
+```
+
+### Admin Dashboard
+
+```env
+ADMIN_API_KEY=          # Secret key required in the X-Admin-Key header for admin API routes
+ADMIN_EMAIL=            # Admin login email
+ADMIN_PASSWORD=         # Admin login password
+ADMIN_SESSION_SECRET=   # Long random string used to sign admin session cookies (keep secret)
+```
+
+Generate a strong session secret with:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### Email (SMTP)
+
+Leave these empty to log emails to the console in development mode.
+
+```env
+SMTP_HOST=          # e.g. smtp.gmail.com, smtp.sendgrid.net
+SMTP_PORT=587       # 587 for STARTTLS, 465 for SSL
+SMTP_USER=          # SMTP username / account
+SMTP_PASS=          # SMTP password / API key
+EMAIL_FROM=         # Sender name and address, e.g. "Miner4 <noreply@miner4.io>"
+```
+
+> **Demo mode**: The app runs without any API keys configured — pricing, payments, and miner provisioning are simulated so you can explore the UI locally.
 
 ## How the Checkout Flow Works
 
 1. Customer picks a hashrate package and clicks **Rent Now**
-2. They enter their email, pool worker username, and preferred cryptocurrency
+2. They enter their email, pool worker username, coin, and preferred payment cryptocurrency
 3. The app creates an order in SQLite and calls NOWPayments to generate a payment address
 4. Customer sends the exact crypto amount to the displayed address
-5. NOWPayments calls the `/api/payments/webhook` endpoint on confirmation
-6. The webhook auto-provisions the best available rig from Mining Rig Rentals API v2
-7. The order status updates to **active** with rental ID and expiry time
+5. NOWPayments calls `/api/payments/webhook` on confirmation
+6. The webhook verifies the IPN signature, confirms the MRR deposit, and auto-provisions the best-priced rig(s) from Mining Rig Rentals
+7. The order status updates to **active** with rental ID(s) and expiry time
+8. Transactional emails are sent at order creation, mining activation, and 1 hour before expiry
+
+## Supported Algorithms
+
+| Algorithm | Hashrate Unit | Min Hashrate |
+|-----------|--------------|-------------|
+| SHA-256 | TH/s | 1 TH/s |
+| Ethash | MH/s | 100 MH/s |
+| Scrypt | MH/s | 100 MH/s |
+| X11 | GH/s | 1 GH/s |
+| RandomX | KH/s | 1,000 KH/s |
+
+## Cron Jobs
+
+Two cron endpoints must be called periodically by your scheduler (e.g. GitHub Actions, Render cron, or cURL from a systemd timer). Both require the `X-Admin-Key` header.
+
+| Endpoint | Recommended frequency | What it does |
+|----------|-----------------------|--------------|
+| `POST /api/cron/expire-orders` | Every 15 minutes | Marks overdue active orders as `expired`, deletes unordered packages older than 24 h, records hourly pricing snapshots |
+| `POST /api/cron/expiry-reminders` | Every 5–15 minutes | Emails customers whose rental expires within the next hour (once per order) |
+
+Example cURL call:
+
+```bash
+curl -X POST https://yourdomain.com/api/cron/expire-orders \
+  -H "X-Admin-Key: $ADMIN_API_KEY"
+```
+
+## Admin Dashboard
+
+Navigate to `/admin` to access the protected dashboard. You will be redirected to `/admin/login` if you are not authenticated.
+
+- View all orders with status, algorithm, hashrate, email, and payment info
+- Filter by status, date range, or email
+- Links to MRR rentals and NOWPayments invoices for each order
+
+Session cookies are `HttpOnly` and signed with `ADMIN_SESSION_SECRET`. The `X-Admin-Key` header is used only for API endpoints (cron jobs and programmatic access); it is **not** required for normal browser navigation.
+
+## Health Check
+
+```
+GET /api/health
+```
+
+Returns HTTP `200` when all services are reachable, `503` when any are not:
+
+```json
+{ "db": "ok", "mrr": "ok", "nowpayments": "ok", "timestamp": "..." }
+```
+
+## Development
+
+```bash
+npm run dev      # Start Next.js dev server on http://localhost:3000
+npm run build    # Production build
+npm start        # Start production server
+npm run lint     # ESLint
+npm test         # Vitest unit tests
+```

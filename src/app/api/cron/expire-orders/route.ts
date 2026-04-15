@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { computePrice } from '@/lib/pricing';
+import { ALGORITHM_UNIT_MAP } from '@/lib/algorithmConfig';
 import { createLogger } from '@/lib/logger';
 import { isAdminAuthorized } from '@/lib/adminAuth';
 
@@ -65,7 +66,7 @@ export async function POST(req: Request) {
   const pricingResults: Array<{ algorithm: string; recorded: boolean }> = [];
   for (const algo of ALGORITHMS) {
     try {
-      const price = await computePrice(algo, REFERENCE_HASHRATES[algo] ?? 1, 24);
+      const price = await computePrice(algo, REFERENCE_HASHRATES[algo] ?? 1, 24, ALGORITHM_UNIT_MAP[algo]);
       if (!price.keysConfigured) continue;
 
       db.prepare(`

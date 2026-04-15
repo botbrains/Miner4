@@ -56,7 +56,7 @@ export async function POST(
     // Compute live pricing for the renewal package
     let priceUsd: number;
     try {
-      const price = await computePrice(original.algorithm, original.hashrate, original.duration_hours);
+      const price = await computePrice(original.algorithm, original.hashrate, original.duration_hours, original.unit);
       if (!price.keysConfigured) {
         return NextResponse.json({ success: false, error: 'Pricing service is not configured' }, { status: 503 });
       }

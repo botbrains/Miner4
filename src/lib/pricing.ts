@@ -148,15 +148,24 @@ export async function computePrice(
       throw new Error(`No available rigs found for algorithm: ${algorithm}`);
     }
 
-    // Derive the authoritative unit from the first rig's advertised hashrate type.
-    // selectRigsForHashrate already filters by unit match, so all rigs here share
-    // the same unit.
-    const rigUnit = rigs[0].hashrate?.advertised?.type ?? '';
+    // Derive the authoritative unit from the first rig's advertised hashrate
+    // type. MRR may return rigs with mixed units (e.g. some in TH, some in
+    // GH) so we filter to only rigs that share this unit before computing
+    // BTC-per-hash ratios — mixing units would make the ratios incomparable
+    // and Math.min would silently pick an incompatible value.
+    const rigUnit     = rigs[0].hashrate?.advertised?.type ?? '';
+    const rigUnitNorm = normalizeHashUnit(rigUnit);
+
+    const sameUnitRigs = rigs.filter(
+      r => normalizeHashUnit(r.hashrate?.advertised?.type ?? '') === rigUnitNorm,
+    );
+    availableRigs = sameUnitRigs.length;
+
     if (unit && rigUnit) {
       hashrateInMrrUnits = convertHashrate(hashrate, unit, rigUnit);
     }
 
-    const prices = rigs
+    const prices = sameUnitRigs
       .map(r => {
         const price            = r.price?.BTC?.price;
         const advertisedHashrate = r.hashrate?.advertised?.hash;

@@ -527,7 +527,11 @@ export async function getAlgoSuggestedPrice(algorithm: string): Promise<MrrAlgoS
     const amount = parseNum(entry.suggested_price.amount);
     const unit   = entry.suggested_price.unit ?? '';
 
-    if (!Number.isFinite(amount) || amount <= 0) return null;
+    // A missing or empty unit makes the price uninterpretable — we cannot
+    // safely convert the caller's hashrate without knowing the unit MRR used.
+    // Return null so the caller falls back to rig-based pricing, which derives
+    // the authoritative unit from hashrate.advertised.type on the rig records.
+    if (!Number.isFinite(amount) || amount <= 0 || !unit) return null;
 
     // Parse live stats when present
     let stats: MrrAlgoSuggestedPrice['stats'] = null;

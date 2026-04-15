@@ -359,6 +359,94 @@ export function hasMrrKeys(): boolean {
 }
 
 /**
+ * A single transaction record from GET /account/transactions.
+ * MRR API v2 returns decimal amounts as strings.
+ */
+export interface MrrAccountTransaction {
+  id: number | string;
+  /** ISO 8601 or MRR date string, e.g. "2024-01-15 12:34:56" */
+  date: string;
+  /** e.g. "deposit", "withdrawal", "rental" */
+  type: string;
+  amount: number | string;
+  currency: string;
+  /** e.g. "confirmed", "pending" */
+  status?: string;
+  txid?: string;
+  notes?: string;
+}
+
+/**
+ * Fetch recent account transactions from MRR APIv2 GET /account/transactions.
+ *
+ * @param afterIso - Optional ISO 8601 lower bound; transactions before this date are
+ *                   excluded by the caller (the endpoint itself may not support filtering).
+ */
+export async function getAccountTransactions(
+  afterIso?: string,
+): Promise<MrrAccountTransaction[]> {
+  type TxResponse = {
+    success: boolean;
+    data:
+      | MrrAccountTransaction[]
+      | { records?: MrrAccountTransaction[] }
+      | { transactions?: MrrAccountTransaction[] };
+  };
+
+  const res = await mrrRequest<TxResponse>('GET', '/account/transactions');
+
+  let records: MrrAccountTransaction[];
+  if (Array.isArray(res.data)) {
+    records = res.data;
+  } else if ((res.data as { records?: MrrAccountTransaction[] }).records) {
+    records = (res.data as { records: MrrAccountTransaction[] }).records;
+  } else if ((res.data as { transactions?: MrrAccountTransaction[] }).transactions) {
+    records = (res.data as { transactions: MrrAccountTransaction[] }).transactions;
+  } else {
+    records = [];
+  }
+
+  if (!afterIso) return records;
+
+  // Filter client-side for transactions on or after `afterIso`
+  const afterMs = Date.parse(afterIso);
+  if (!Number.isFinite(afterMs)) return records;
+
+  return records.filter(tx => {
+    const txMs = Date.parse(tx.date);
+    return Number.isFinite(txMs) && txMs >= afterMs;
+  });
+}
+
+/**
+ * Returns `true` when the MRR account shows at least one confirmed deposit
+ * that was recorded on or after `afterIso`.
+ *
+ * Used by the payment webhook to verify that funds have arrived in the MRR
+ * account before attempting to rent rigs.
+ *
+ * Returns `false` on any API error so the caller can decide how to handle the
+ * failure (e.g. defer provisioning and let the webhook retry).
+ */
+export async function hasMrrDepositSince(afterIso: string): Promise<boolean> {
+  try {
+    const txns = await getAccountTransactions(afterIso);
+    return txns.some(tx => {
+      const typeLC = (tx.type ?? '').toLowerCase();
+      const isDeposit = typeLC === 'deposit' || typeLC === 'credit' || typeLC.includes('deposit');
+      const isConfirmed =
+        !tx.status || ['confirmed', 'complete', 'completed', 'success'].includes(
+          tx.status.toLowerCase(),
+        );
+      return isDeposit && isConfirmed;
+    });
+  } catch {
+    // Non-fatal: treat as "not yet confirmed" so the caller can retry
+    return false;
+  }
+}
+
+/**
  * Suggested price for a single algorithm as returned by GET /info/algos.
  * This is the MRR-authoritative server-side price used as the primary pricing source.
  */

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { verifyWebhookSignature } from '@/lib/nowpayments';
-import { provisionMiner } from '@/lib/mrr';
+import { provisionMiner, hasMrrDepositSince } from '@/lib/mrr';
 import { sendEmail } from '@/lib/email';
 import {
   miningActiveEmail,
@@ -61,6 +61,7 @@ export async function POST(req: Request) {
       mrr_rental_id?: string | null;
       expires_at?: string | null;
       mrr_rental_ids?: string | null;
+      created_at?: string;
     } | undefined;
 
     // Return 200 for unknown order_id so NOWPayments does not retry indefinitely
@@ -155,6 +156,20 @@ export async function POST(req: Request) {
         if (!Number.isFinite(port) || port <= 0) port = 3333;
         return { host, port, password: explicitPassword };
       };
+
+      // Verify via MRR APIv2 GET /account/transactions that funds arrived in the
+      // MRR account before renting any rigs. Use the order creation timestamp as
+      // the lower bound. If no deposit is found, return 503 so that NOWPayments
+      // retries the webhook, giving time for the deposit to be credited.
+      const orderCreatedAt = order.created_at ?? new Date(Date.now() - 24 * 3600_000).toISOString();
+      const mrrDepositConfirmed = await hasMrrDepositSince(orderCreatedAt);
+      if (!mrrDepositConfirmed) {
+        log.warn('MRR account deposit not yet confirmed – deferring provisioning', { orderId: order_id });
+        return NextResponse.json(
+          { error: 'MRR deposit not yet reflected – will retry' },
+          { status: 503 },
+        );
+      }
 
       // Resolve pool config from stored order data
       const pool = resolvePoolConfig(order);

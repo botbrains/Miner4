@@ -8,6 +8,7 @@ export interface Package {
   duration_hours: number;
   description: string;
   popular: number;
+  created_at: string;
 }
 
 export const ORDER_STATUSES = [
@@ -44,7 +45,7 @@ export interface Order {
   coin: string | null;
   pool_id: string | null;
   pool_url: string | null;
-  reminder_sent: number;
+  reminder_sent: number | null;
   expires_at: string | null;
   created_at: string;
   updated_at: string;

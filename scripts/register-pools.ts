@@ -22,8 +22,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv({ path: path.resolve(__dirname, '..', '.env.local') });
 
 // Dynamic import after env is loaded
-const { POOLS } = await import('../src/config/pools.js');
-const { mrrRequest } = await import('../src/lib/mrr.js');
+const { POOLS } = await import('../src/config/pools.ts');
+const { mrrRequest } = await import('../src/lib/mrr.ts');
 
 interface MrrPool {
   id: number | string;

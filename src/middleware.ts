@@ -29,7 +29,16 @@ async function verifySessionToken(token: string): Promise<boolean> {
   const sig      = token.slice(dotIndex + 1);
   const expected = await hmacSha256Hex(secret, payload);
 
-  if (expected !== sig) return false;
+  // Constant-time byte-by-byte comparison to prevent timing attacks
+  const enc2 = new TextEncoder();
+  const sigBytes      = enc2.encode(sig);
+  const expectedBytes = enc2.encode(expected);
+  if (sigBytes.length !== expectedBytes.length) return false;
+  let diff = 0;
+  for (let i = 0; i < sigBytes.length; i++) {
+    diff |= sigBytes[i] ^ expectedBytes[i];
+  }
+  if (diff !== 0) return false;
 
   try {
     const data = JSON.parse(atob(payload)) as { exp: number };
@@ -59,6 +68,7 @@ export async function middleware(req: NextRequest) {
   const exemptPaths = [
     '/api/payments/webhook', // NOWPayments IPN – external service
     '/api/admin/login',      // Login endpoint – credentials-based auth
+    '/api/cron/',            // Cron endpoints – already protected by X-Admin-Key
   ];
 
   if (

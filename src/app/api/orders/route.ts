@@ -136,6 +136,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Package not found' }, { status: 404 });
     }
 
+    // Prevent duplicate orders for the same package
+    const existingOrder = db.prepare(
+      `SELECT id FROM orders WHERE package_id = ? LIMIT 1`,
+    ).get(packageId);
+    if (existingOrder) {
+      return NextResponse.json(
+        { success: false, error: 'An order already exists for this package' },
+        { status: 409 },
+      );
+    }
+
     const orderId = randomUUID();
     db.prepare(`
       INSERT INTO orders (id, package_id, email, worker_name, payment_currency, coin, pool_id, pool_url, status)

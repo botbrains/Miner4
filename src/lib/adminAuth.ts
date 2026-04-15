@@ -6,7 +6,7 @@
  *   2. A valid `admin_session` cookie signed with `ADMIN_SESSION_SECRET` (browser dashboard).
  */
 
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 export function isAdminAuthorized(req: Request): boolean {
   // 1. X-Admin-Key header (for cron schedulers and API clients)
@@ -28,7 +28,10 @@ export function isAdminAuthorized(req: Request): boolean {
   const payload  = token.slice(0, dotIndex);
   const sig      = token.slice(dotIndex + 1);
   const expected = createHmac('sha256', secret).update(payload).digest('hex');
-  if (expected !== sig) return false;
+  // Constant-time comparison to prevent timing attacks
+  const expectedBuf = Buffer.from(expected, 'hex');
+  const sigBuf = Buffer.from(sig, 'hex');
+  if (expectedBuf.length !== sigBuf.length || !timingSafeEqual(expectedBuf, sigBuf)) return false;
 
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64').toString()) as { exp: number };

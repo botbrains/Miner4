@@ -66,7 +66,7 @@ export async function POST(
       return NextResponse.json({ success: false, error: msg }, { status: 502 });
     }
 
-    // Create a new package record
+    // Create a new package record (the order is created by the checkout flow)
     const packageId = randomUUID();
     const name = `${original.algorithm} – ${original.hashrate.toLocaleString()} ${original.unit} / ${original.duration_hours}h`;
     const description = `Custom ${original.algorithm} renewal: ${original.hashrate.toLocaleString()} ${original.unit} for ${original.duration_hours} hours.`;
@@ -76,25 +76,9 @@ export async function POST(
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
     `).run(packageId, name, original.algorithm, original.hashrate, original.unit, priceUsd, original.duration_hours, description);
 
-    // Create a new order copying the original's details
-    const newOrderId = randomUUID();
-    db.prepare(`
-      INSERT INTO orders (id, package_id, email, worker_name, payment_currency, coin, pool_id, pool_url, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-    `).run(
-      newOrderId,
-      packageId,
-      original.email,
-      original.worker_name,
-      original.payment_currency,
-      original.coin ?? null,
-      original.pool_id ?? null,
-      original.pool_url ?? null,
-    );
-
     return NextResponse.json({
       success: true,
-      data: { newOrderId, packageId },
+      data: { packageId },
     });
   } catch (err) {
     console.error('[orders/id/renew] POST error:', err);

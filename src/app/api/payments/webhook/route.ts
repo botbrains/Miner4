@@ -80,10 +80,17 @@ export async function POST(req: Request) {
         UPDATE orders SET status = 'partially_paid', updated_at = datetime('now') WHERE id = ?
       `).run(order_id);
 
-      const shortfall = (order.payment_amount ?? 0) - (actually_paid ?? 0);
-      const partialOpts = partialPaymentEmail(order as Parameters<typeof partialPaymentEmail>[0], shortfall);
-      sendEmail({ to: order.email, ...partialOpts }).catch(() => {});
-      log.info('Order partially paid', { orderId: order_id, shortfall });
+      const paymentAmountKnown = typeof order.payment_amount === 'number';
+      const shortfall = paymentAmountKnown
+        ? Math.max(0, order.payment_amount! - (actually_paid ?? 0))
+        : 0;
+
+      if (paymentAmountKnown && shortfall > 0) {
+        const partialOpts = partialPaymentEmail(order as Parameters<typeof partialPaymentEmail>[0], shortfall);
+        sendEmail({ to: order.email, ...partialOpts }).catch(() => {});
+      }
+
+      log.info('Order partially paid', { orderId: order_id, shortfall, partialPaymentEmailSent: paymentAmountKnown && shortfall > 0 });
       return NextResponse.json({ success: true });
     }
 
@@ -98,11 +105,59 @@ export async function POST(req: Request) {
 
     // --- confirmed / finished ---
     const confirmedStatuses = ['confirmed', 'finished'];
-    if (confirmedStatuses.includes(payment_status) && order.status === 'awaiting_payment') {
+    const provisionableStatuses = ['awaiting_payment', 'partially_paid'];
+    if (confirmedStatuses.includes(payment_status) && provisionableStatuses.includes(order.status)) {
+      // Resolve pool config: prefer explicit host/port/pass fields, fall back to parsing pool_url
+      const resolvePoolConfig = (
+        rawOrder: typeof order,
+      ): { host: string; port: number; password: string } | undefined => {
+        const poolOrder = rawOrder as typeof rawOrder & {
+          pool_host?: string | null;
+          pool_port?: number | string | null;
+          pool_pass?: string | null;
+        };
+
+        const rawUrl = typeof rawOrder.pool_url === 'string' ? rawOrder.pool_url.trim() : '';
+        const explicitHost = typeof poolOrder.pool_host === 'string' ? poolOrder.pool_host.trim() : '';
+        const explicitPassword =
+          typeof poolOrder.pool_pass === 'string' && poolOrder.pool_pass.trim()
+            ? poolOrder.pool_pass.trim()
+            : 'x';
+
+        let host = explicitHost;
+        let port = Number(poolOrder.pool_port);
+
+        if (rawUrl) {
+          try {
+            const normalized = /^[a-z][a-z0-9+.-]*:\/\//i.test(rawUrl)
+              ? rawUrl
+              : `stratum+tcp://${rawUrl}`;
+            const parsed = new URL(normalized);
+            if (!host) host = parsed.hostname;
+            if (!Number.isFinite(port) || port <= 0) {
+              const parsedPort = parsed.port ? Number(parsed.port) : NaN;
+              if (Number.isFinite(parsedPort) && parsedPort > 0) port = parsedPort;
+            }
+          } catch {
+            if (!host) {
+              const match = rawUrl.match(/^(?:[a-z][a-z0-9+.-]*:\/\/)?([^:/?#]+)(?::(\d+))?/i);
+              if (match) {
+                host = match[1];
+                if ((!Number.isFinite(port) || port <= 0) && match[2]) port = Number(match[2]);
+              } else {
+                host = rawUrl;
+              }
+            }
+          }
+        }
+
+        if (!host) return undefined;
+        if (!Number.isFinite(port) || port <= 0) port = 3333;
+        return { host, port, password: explicitPassword };
+      };
+
       // Resolve pool config from stored order data
-      const pool = (order.pool_url)
-        ? { host: order.pool_url, port: 3333, password: 'x' }
-        : undefined;
+      const pool = resolvePoolConfig(order);
 
       try {
         const result = await provisionMiner(

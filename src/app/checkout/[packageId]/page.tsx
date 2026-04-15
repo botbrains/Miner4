@@ -56,7 +56,7 @@ function CheckoutContent() {
         }
         const p = d.data as Package;
         // Check if the package was created more than 24 hours ago
-        const createdAt = new Date((p as unknown as { created_at: string }).created_at);
+        const createdAt = new Date(p.created_at);
         if (Date.now() - createdAt.getTime() > 24 * 3600_000) {
           router.replace('/packages?error=expired');
           return;
@@ -118,6 +118,10 @@ function CheckoutContent() {
           poolUrl: selectedPool?.host,
         }),
       });
+      if (orderRes.status === 409) {
+        router.replace('/packages?error=already_purchased');
+        return;
+      }
       const orderData = await orderRes.json();
       if (!orderData.success) throw new Error(orderData.error ?? 'Failed to create order');
 

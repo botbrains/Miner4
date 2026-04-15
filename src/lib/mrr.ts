@@ -296,8 +296,9 @@ export async function provisionMiner(
   if (!chosenRigs) return null;
 
   // Rent all selected rigs sequentially (avoids MRR API nonce collisions).
-  // If any rental fails the whole provisioning attempt is aborted; already-created
-  // rentals are logged so they can be cancelled manually if necessary.
+  // If any rental fails the whole provisioning attempt is aborted. Already-started
+  // rentals CANNOT be cancelled early via the MRR API – MRR rentals are fixed-duration
+  // contracts. Already-started rental IDs are logged for support visibility.
   const rentals: RentalResult[] = [];
   for (const rig of chosenRigs) {
     try {
@@ -306,7 +307,7 @@ export async function provisionMiner(
     } catch (err) {
       if (rentals.length > 0) {
         console.error(
-          '[provisionMiner] Partial failure – rigs already rented that may need manual cancellation:',
+          '[provisionMiner] Partial failure – already-started rental IDs logged for support (MRR rentals are fixed-duration and cannot be cancelled early):',
           rentals.map(r => r.rentalId),
         );
       }

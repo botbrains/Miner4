@@ -98,10 +98,9 @@ a confirmed, active rental.
       up to 3 times with exponential back-off (delays of 1 s, 2 s, 4 s);
       mark the order `provisioning_failed` only after all retries are
       exhausted
-- [ ] Cancel already-rented rigs automatically when partial provisioning fails
-      (currently only logs rental IDs for manual cancellation)
-- [ ] `DELETE /api/rentals/:rentalId` – expose MRR rental cancellation via app
-      API for admin/support use
+- [ ] On partial provisioning failure (multi-rig order), log all already-started
+      rental IDs for support visibility; note that MRR rentals are
+      **fixed-duration contracts and cannot be cancelled early** via the API
 
 ---
 
@@ -122,16 +121,14 @@ a confirmed, active rental.
       `provisioning_failed`, `expired`
 - [ ] Scheduled job / cron route (`POST /api/cron/expire-orders`) that
       requires a valid `X-Admin-Key` header matching the `ADMIN_API_KEY`
-      environment variable, marks `active` orders as `expired` once
-      `expires_at` has passed, and cancels the associated MRR rental if it is
-      still running
+      environment variable and marks `active` orders as `expired` once
+      `expires_at` has passed; note that MRR rentals are fixed-duration
+      contracts that expire on their own schedule – the app only updates
+      internal order state and does **not** (and cannot) cancel the MRR
+      rental early via the API
 - [ ] `PATCH /api/orders/:id` – admin-only endpoint (requires valid
       `X-Admin-Key` header) to manually override order status (e.g.,
-      force-retry provisioning, mark as refunded)
-- [ ] Refund workflow – `POST /api/orders/:id/refund` admin-only endpoint
-      (requires valid `X-Admin-Key` header) that triggers a NOWPayments
-      refund via the NOWPayments refund API and updates order status to
-      `refunded`
+      force-retry provisioning)
 
 ### 2.3 Rental Extension / Renewal
 - [ ] `POST /api/orders/:id/renew` – create a follow-on order pre-filled with

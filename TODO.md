@@ -23,9 +23,13 @@ a confirmed, active rental.
 - [x] `GET /api/packages/:id` – fetch a single package by ID
 - [x] Algorithm allowlist + server-authoritative unit derivation (`ALGORITHM_UNIT_MAP`)
 - [x] Live pricing preview on `/packages` via `GET /api/pricing`
-- [ ] Stale package cleanup – delete packages older than N hours that never
-      received an order (prevents unbounded DB growth)
-- [ ] Rate-limit `POST /api/packages` per IP to prevent pricing-scraping abuse
+- [ ] Stale package cleanup – delete packages older than 24 hours that never
+      received an order (prevents unbounded DB growth); run as part of the
+      same cron route as order expiry (`GET /api/cron/expire-orders`)
+- [ ] Rate-limit `POST /api/packages` per IP to prevent pricing-scraping
+      abuse – allow a maximum of 10 requests per minute per IP address;
+      return `429 Too Many Requests` with a `Retry-After` header when the
+      limit is exceeded
 
 ### 1.2 Checkout & Order Creation
 - [x] `POST /api/orders` – create an order for a package
@@ -57,16 +61,26 @@ a confirmed, active rental.
       default pool. A sensible default pool should be pre-selected so this field
       remains optional for most users.
 - [ ] Minimum hashrate floor enforcement per algorithm at the API level
-      (currently only enforced by the UI slider)
-- [ ] Show estimated mining start time at checkout (based on average payment
-      confirmation time for the chosen currency)
+      (currently only enforced by the UI slider) – define a new
+      `ALGORITHM_MIN_HASHRATE` map in `src/app/api/packages/route.ts`
+      alongside `ALGORITHM_UNIT_MAP`; reject `POST /api/packages` requests
+      where the requested hashrate is below the floor for that algorithm
+      with `400 Bad Request` and a message stating the minimum value and unit
+- [ ] Show estimated mining start time at checkout – use a hardcoded
+      per-currency average confirmation time map (e.g. BTC ≈ 60 min,
+      ETH ≈ 5 min, LTC ≈ 2.5 min, USDT ≈ 5 min); display the value as
+      "typically ready in ~X min" and note it is an estimate; store the map
+      in `src/config/confirmationTimes.ts`
 
 ### 1.3 Payment Processing
 - [x] `POST /api/payments/webhook` – NOWPayments IPN handler
 - [x] Signature verification via `verifyWebhookSignature`
 - [x] Auto-provision miners on `confirmed`/`finished` payment status
-- [ ] Handle `partially_paid` webhook status – notify user and optionally
-      request a top-up or issue a partial refund
+- [ ] Handle `partially_paid` webhook status – update the order status to
+      `partially_paid` and send the user an email showing the shortfall
+      amount and the original NOWPayments payment address so they can top
+      up; do not provision miners; if full payment is never completed the
+      order will be expired by the scheduled expiry job
 - [ ] Idempotency guard – skip re-provisioning if the order is already `active`
       when the same `confirmed` webhook fires a second time (currently guarded
       by `order.status === 'awaiting_payment'` check, but worth an explicit
@@ -78,7 +92,10 @@ a confirmed, active rental.
 - [x] `provisionMiner` – auto-selects and rents one or more MRR rigs
 - [x] Multi-rig support (`mrr_rental_ids` JSON array)
 - [x] Cost-aware rig selection heuristic (`selectRigsForHashrate`)
-- [ ] Retry logic for transient MRR API failures during provisioning
+- [ ] Retry logic for transient MRR API failures during provisioning – retry
+      up to 3 times with exponential back-off (delays of 1 s, 2 s, 4 s);
+      mark the order `provisioning_failed` only after all retries are
+      exhausted
 - [ ] Cancel already-rented rigs automatically when partial provisioning fails
       (currently only logs rental IDs for manual cancellation)
 - [ ] `DELETE /api/rentals/:rentalId` – expose MRR rental cancellation via app
@@ -89,7 +106,11 @@ a confirmed, active rental.
 ## 2. Managing (Order & Rental Lifecycle)
 
 ### 2.1 Order Listing & Lookup
-- [ ] `GET /api/orders` – list orders (admin: all; user: filter by email)
+- [ ] `GET /api/orders` – list orders; callers that supply a valid
+      `X-Admin-Key` header matching the `ADMIN_API_KEY` environment variable
+      receive all orders; unauthenticated callers must supply an `?email=`
+      query parameter and receive only orders matching that email address;
+      return `401` if neither condition is met
 - [ ] `/orders` page – "My Orders" lookup: user enters their email to see a
       list of all their orders and statuses
 - [ ] Order search by email or order ID (useful for customer support)
@@ -98,12 +119,15 @@ a confirmed, active rental.
 - [x] Order statuses: `pending`, `awaiting_payment`, `active`,
       `provisioning_failed`, `expired`
 - [ ] Scheduled job / cron route (`GET /api/cron/expire-orders`) that marks
-      `active` orders as `expired` once `expires_at` has passed and
-      optionally cancels the MRR rental if still running
-- [ ] `PATCH /api/orders/:id` – admin endpoint to manually override order
-      status (e.g., force-retry provisioning, mark as refunded)
-- [ ] Refund workflow – endpoint to trigger a NOWPayments refund and update
-      order status to `refunded`
+      `active` orders as `expired` once `expires_at` has passed and cancels
+      the associated MRR rental if it is still running
+- [ ] `PATCH /api/orders/:id` – admin-only endpoint (requires valid
+      `X-Admin-Key` header) to manually override order status (e.g.,
+      force-retry provisioning, mark as refunded)
+- [ ] Refund workflow – `POST /api/orders/:id/refund` admin-only endpoint
+      (requires valid `X-Admin-Key` header) that triggers a NOWPayments
+      refund via the NOWPayments refund API and updates order status to
+      `refunded`
 
 ### 2.3 Rental Extension / Renewal
 - [ ] `POST /api/orders/:id/renew` – create a follow-on order pre-filled with
@@ -112,7 +136,11 @@ a confirmed, active rental.
 - [ ] Display "Renew" CTA on the order page when less than 2 hours remain
 
 ### 2.4 Admin Dashboard
-- [ ] Protected `/admin` route (basic auth or secret header) showing:
+- [ ] Protected `/admin` route – gate access with a valid `X-Admin-Key`
+      request header matching the `ADMIN_API_KEY` environment variable
+      (consistent with all other admin API endpoints); redirect to a login
+      page or return `401` for requests without a valid key; the dashboard
+      shows:
   - All orders with status, package details, email, payment info
   - Filterable by status, date range, algorithm
   - Links to the MRR rental and NOWPayments invoice for each order
@@ -125,16 +153,18 @@ a confirmed, active rental.
 ### 3.1 Per-Order Status Page (existing, extend)
 - [x] `/order/[id]` – order status page with payment and mining details
 - [x] Auto-refresh every 15 s while `awaiting_payment` or `confirming`
-- [ ] Show live MRR rental status fetched from `GET /api/rentals/:rentalId`
-      (rig online/offline, actual hashrate if available) on the order page
+- [ ] Show live MRR rental status on the order page (rig online/offline,
+      actual hashrate if available) – fetches from `GET /api/rentals/:rentalId`;
+      **implement §3.2 `GET /api/rentals/:rentalId` first**
 - [ ] Countdown timer updating in real time (currently computed once on render)
-- [ ] Show all rental IDs when multiple rigs were provisioned (`mrr_rental_ids`)
-      with individual status for each
+- [ ] Show all rental IDs when multiple rigs were provisioned
+      (`mrr_rental_ids`) with individual status for each – **depends on
+      `GET /api/rentals/:rentalId` from §3.2**
 
 ### 3.2 MRR Live Rental Status API
 - [ ] `GET /api/rentals/:rentalId` – proxy to MRR `GET /rental/:id` and return
       status, start/end times, and actual hashrate
-- [ ] Cache MRR rental responses for ~60 s to avoid hammering the MRR API when
+- [ ] Cache MRR rental responses for 60 s to avoid hammering the MRR API when
       multiple users refresh the same order page
 
 ### 3.3 Notifications
@@ -163,7 +193,11 @@ a confirmed, active rental.
 - [x] Server-side price computation (prevents price-manipulation)
 - [x] Server-side algorithm + unit validation
 - [x] Webhook signature verification
-- [ ] CSRF protection on all state-mutating API routes (POST/PATCH/DELETE)
+- [ ] CSRF protection on all state-mutating API routes (POST/PATCH/DELETE) –
+      set `SameSite=Strict` on any cookies used by the app and add a
+      middleware check that rejects requests whose `Content-Type` is not
+      `application/json`; revisit if server-side session cookies are
+      introduced (adopt a CSRF-token middleware at that point)
 - [ ] Input sanitization audit for `workerName` (currently regex-validated but
       not length-checked at the DB layer)
 - [ ] Webhook endpoint should return `200 OK` for unknown `order_id` values to

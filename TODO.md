@@ -47,6 +47,15 @@ a confirmed, active rental.
       Stratum URL must be sent to MRR as the rental pool config, overriding any
       default pool. A sensible default pool should be pre-selected so this field
       remains optional for most users.
+- [ ] Research and catalogue solo mining pools for every supported
+      algorithm × coin combination (e.g. SHA-256 / BTC, SHA-256 / BCH,
+      Scrypt / LTC, etc.). For each combination, identify a reliable public
+      solo pool (Stratum URL, port, any required password) and store it in a
+      static server-side seed file (e.g. `src/config/pools.ts`). Once the
+      pool list is finalised, register each pool with the MRR account via
+      `POST /pool` (MRR API v2) so users can select from MRR's pre-defined
+      pool list as well as the app's own curated list. The seed/registration
+      script should be idempotent (skip pools already present by name).
 - [ ] Minimum hashrate floor enforcement per algorithm at the API level
       (currently only enforced by the UI slider)
 - [ ] Show estimated mining start time at checkout (based on average payment

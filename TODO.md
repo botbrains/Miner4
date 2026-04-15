@@ -25,7 +25,9 @@ a confirmed, active rental.
 - [x] Live pricing preview on `/packages` via `GET /api/pricing`
 - [ ] Stale package cleanup – delete packages older than 24 hours that never
       received an order (prevents unbounded DB growth); run as part of the
-      same cron route as order expiry (`GET /api/cron/expire-orders`)
+      same cron route as order expiry (`POST /api/cron/expire-orders`),
+      protected by a valid `X-Admin-Key` header matching the `ADMIN_API_KEY`
+      environment variable and returning `Cache-Control: no-store`
 - [ ] Rate-limit `POST /api/packages` per IP to prevent pricing-scraping
       abuse – allow a maximum of 10 requests per minute per IP address;
       return `429 Too Many Requests` with a `Retry-After` header when the
@@ -106,21 +108,23 @@ a confirmed, active rental.
 ## 2. Managing (Order & Rental Lifecycle)
 
 ### 2.1 Order Listing & Lookup
-- [ ] `GET /api/orders` – list orders; callers that supply a valid
-      `X-Admin-Key` header matching the `ADMIN_API_KEY` environment variable
-      receive all orders; unauthenticated callers must supply an `?email=`
-      query parameter and receive only orders matching that email address;
-      return `401` if neither condition is met
-- [ ] `/orders` page – "My Orders" lookup: user enters their email to see a
-      list of all their orders and statuses
+- [ ] `GET /api/orders` – admin-only list endpoint; callers must supply a
+      valid `X-Admin-Key` header matching the `ADMIN_API_KEY` environment
+      variable to receive orders; return `401` for all other requests
+- [ ] `/orders` page – customer order lookup must not support email-only
+      listing; use the existing unguessable `GET /api/orders/:id` endpoint
+      (for example via an order-specific link or ID-based lookup) instead of
+      returning all orders for an email address
 - [ ] Order search by email or order ID (useful for customer support)
 
 ### 2.2 Order Status Management
 - [x] Order statuses: `pending`, `awaiting_payment`, `active`,
       `provisioning_failed`, `expired`
-- [ ] Scheduled job / cron route (`GET /api/cron/expire-orders`) that marks
-      `active` orders as `expired` once `expires_at` has passed and cancels
-      the associated MRR rental if it is still running
+- [ ] Scheduled job / cron route (`POST /api/cron/expire-orders`) that
+      requires a valid `X-Admin-Key` header matching the `ADMIN_API_KEY`
+      environment variable, marks `active` orders as `expired` once
+      `expires_at` has passed, and cancels the associated MRR rental if it is
+      still running
 - [ ] `PATCH /api/orders/:id` – admin-only endpoint (requires valid
       `X-Admin-Key` header) to manually override order status (e.g.,
       force-retry provisioning, mark as refunded)
@@ -136,11 +140,13 @@ a confirmed, active rental.
 - [ ] Display "Renew" CTA on the order page when less than 2 hours remain
 
 ### 2.4 Admin Dashboard
-- [ ] Protected `/admin` route – gate access with a valid `X-Admin-Key`
-      request header matching the `ADMIN_API_KEY` environment variable
-      (consistent with all other admin API endpoints); redirect to a login
-      page or return `401` for requests without a valid key; the dashboard
-      shows:
+- [ ] Protected `/admin` route – require a browser-compatible auth flow
+      (preferred: login that sets an HttpOnly session cookie; alternatively
+      route-level middleware/basic auth); do **not** gate normal browser
+      navigation to `/admin` with a custom `X-Admin-Key` request header;
+      keep header-based auth (`X-Admin-Key` / `ADMIN_API_KEY`) for admin
+      API endpoints only; redirect unauthenticated users to a login page
+      or return `401`; the dashboard shows:
   - All orders with status, package details, email, payment info
   - Filterable by status, date range, algorithm
   - Links to the MRR rental and NOWPayments invoice for each order

@@ -1,6 +1,6 @@
 /**
  * Mining Rig Rentals API v2 service.
- * Docs: https://www.miningrigrentals.com/apidoc/v2
+ * Docs: https://www.miningrigrentals.com/apidocv2
  *
  * Required environment variables:
  *   MRR_API_KEY    – your MRR API key
@@ -460,6 +460,61 @@ export interface MrrAlgoSuggestedPrice {
 }
 
 /**
+ * Canonical algorithm metadata as reported by MRR API v2 GET /info/algos.
+ * This should be treated as the authoritative source for algorithm name/unit.
+ */
+export interface MrrAlgoInfo {
+  /** MRR algorithm name (e.g. 'sha256') */
+  name: string;
+  /** Display label from MRR when available (e.g. 'SHA-256') */
+  display: string;
+  /** Hashrate unit (e.g. 'TH', 'MH') */
+  unit: string;
+}
+
+/**
+ * Fetch full algorithm metadata from MRR API v2 GET /info/algos.
+ * Returns an empty array on transient failures so callers can handle gracefully.
+ */
+export async function getAlgoInfoList(): Promise<MrrAlgoInfo[]> {
+  type AlgoEntry = {
+    name?: string;
+    display?: string;
+    suggested_price?: {
+      unit?: string;
+    };
+  };
+
+  type AlgosResponse = {
+    success: boolean;
+    data: AlgoEntry[] | { records?: AlgoEntry[] };
+  };
+
+  try {
+    const res = await mrrRequest<AlgosResponse>('GET', '/info/algos');
+    if (!res.success) return [];
+
+    const records: AlgoEntry[] = Array.isArray(res.data)
+      ? res.data
+      : ((res.data as { records?: AlgoEntry[] }).records ?? []);
+
+    return records
+      .map((entry) => {
+        const name = (entry.name ?? '').trim();
+        if (!name) return null;
+        return {
+          name,
+          display: (entry.display ?? name).trim(),
+          unit: (entry.suggested_price?.unit ?? '').trim(),
+        } satisfies MrrAlgoInfo;
+      })
+      .filter((entry): entry is MrrAlgoInfo => !!entry);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Fetch the MRR-suggested price for a specific algorithm via GET /info/algos.
  *
  * This endpoint is the recommended server-side pricing source in MRR API v2:
@@ -509,4 +564,3 @@ export async function getAlgoSuggestedPrice(algorithm: string): Promise<MrrAlgoS
     return null;
   }
 }
-

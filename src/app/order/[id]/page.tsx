@@ -36,6 +36,22 @@ interface RentalStatus {
   loading: boolean;
 }
 
+function getOrderRentalIds(order: Order): string[] {
+  const ids: string[] = [];
+  if (order.mrr_rental_ids) {
+    try {
+      const parsed = JSON.parse(order.mrr_rental_ids) as unknown;
+      if (Array.isArray(parsed)) {
+        ids.push(...parsed.filter((id): id is string => typeof id === 'string' && id.trim().length > 0));
+      }
+    } catch {
+      // ignore malformed JSON and fall back to primary rental ID
+    }
+  }
+  if (ids.length === 0 && order.mrr_rental_id) ids.push(order.mrr_rental_id);
+  return [...new Set(ids)];
+}
+
 function formatCountdown(ms: number): string {
   if (ms <= 0) return '00:00:00';
   const totalSeconds = Math.floor(ms / 1000);
@@ -101,18 +117,21 @@ function OrderContent() {
     };
   }, [order?.status, order?.expires_at]);
 
-  // Fetch live rental statuses for active orders
-  useEffect(() => {
-    if (!order || order.status !== 'active') return;
-    const ids: string[] = [];
-    if (order.mrr_rental_ids) {
-      try { ids.push(...JSON.parse(order.mrr_rental_ids) as string[]); } catch { /* ignore */ }
-    } else if (order.mrr_rental_id) {
-      ids.push(order.mrr_rental_id);
+  const refreshRentalStatuses = useCallback((activeOrder: Order) => {
+    const ids = getOrderRentalIds(activeOrder);
+    if (!ids.length) {
+      setRentalStatuses([]);
+      return;
     }
-    if (!ids.length) return;
 
-    setRentalStatuses(ids.map(rid => ({ rentalId: rid, data: null, loading: true })));
+    setRentalStatuses(prev => {
+      const prevById = new Map(prev.map(status => [status.rentalId, status] as const));
+      return ids.map(rid => ({
+        rentalId: rid,
+        data: prevById.get(rid)?.data ?? null,
+        loading: true,
+      }));
+    });
 
     ids.forEach(rid => {
       fetch(`/api/rentals/${rid}`)
@@ -130,7 +149,19 @@ function OrderContent() {
           ));
         });
     });
-  }, [order]);
+  }, []);
+
+  // Fetch live rental statuses for active orders and keep refreshing
+  useEffect(() => {
+    if (!order || order.status !== 'active') {
+      setRentalStatuses([]);
+      return;
+    }
+
+    refreshRentalStatuses(order);
+    const statusInterval = setInterval(() => refreshRentalStatuses(order), 30_000);
+    return () => clearInterval(statusInterval);
+  }, [order, refreshRentalStatuses]);
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text).then(() => {

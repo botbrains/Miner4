@@ -115,7 +115,10 @@ function CheckoutContent() {
           paymentCurrency: form.paymentCurrency,
           coin: selectedCoin?.coin,
           poolId: selectedPool?.name,
-          poolUrl: selectedPool?.host,
+          poolUrl: selectedPool ? `${selectedPool.host}:${selectedPool.port}` : undefined,
+          poolHost: selectedPool?.host,
+          poolPort: selectedPool?.port,
+          poolPass: selectedPool?.password,
         }),
       });
       if (orderRes.status === 409) {
@@ -144,7 +147,7 @@ function CheckoutContent() {
     } finally {
       setSubmitting(false);
     }
-  }, [pkg, form, selectedCoin, selectedPool]);
+  }, [pkg, form, selectedCoin, selectedPool, router]);
 
   const handleCopyAmount = useCallback((text: string) => {
     navigator.clipboard.writeText(text).then(() => {

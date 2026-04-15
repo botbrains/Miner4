@@ -83,12 +83,26 @@ interface OrderBody {
   coin?: string;
   poolId?: string;
   poolUrl?: string;
+  poolHost?: string;
+  poolPort?: number;
+  poolPass?: string;
 }
 
 export async function POST(req: Request) {
   try {
     const body: OrderBody = await req.json();
-    const { packageId, email, workerName, paymentCurrency, coin, poolId, poolUrl } = body;
+    const {
+      packageId,
+      email,
+      workerName,
+      paymentCurrency,
+      coin,
+      poolId,
+      poolUrl,
+      poolHost,
+      poolPort,
+      poolPass,
+    } = body;
 
     if (!packageId || !email || !workerName || !paymentCurrency) {
       return NextResponse.json(
@@ -122,6 +136,13 @@ export async function POST(req: Request) {
       );
     }
 
+    if (poolPort !== undefined && (!Number.isInteger(poolPort) || poolPort <= 0)) {
+      return NextResponse.json(
+        { success: false, error: 'poolPort must be a positive integer' },
+        { status: 400 },
+      );
+    }
+
     const db  = getDb();
     const pkg = db.prepare('SELECT * FROM packages WHERE id = ?').get(packageId) as {
       id: string;
@@ -149,9 +170,24 @@ export async function POST(req: Request) {
 
     const orderId = randomUUID();
     db.prepare(`
-      INSERT INTO orders (id, package_id, email, worker_name, payment_currency, coin, pool_id, pool_url, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-    `).run(orderId, packageId, email, workerName, paymentCurrency, coin ?? null, poolId ?? null, poolUrl ?? null);
+      INSERT INTO orders (
+        id, package_id, email, worker_name, payment_currency, coin,
+        pool_id, pool_url, pool_host, pool_port, pool_pass, status
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+    `).run(
+      orderId,
+      packageId,
+      email,
+      workerName,
+      paymentCurrency,
+      coin ?? null,
+      poolId ?? null,
+      poolUrl ?? null,
+      poolHost ?? null,
+      poolPort ?? null,
+      poolPass ?? null,
+    );
 
     const order = db.prepare(`
       SELECT o.*, p.name as package_name, p.algorithm, p.hashrate, p.unit, p.price_usd, p.duration_hours
@@ -169,4 +205,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: 'Failed to create order' }, { status: 500 });
   }
 }
-

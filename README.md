@@ -18,7 +18,7 @@ A full-stack hashrate rental marketplace — like NiceHash and Mining Rig Rental
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Next.js 16.2 (App Router) |
+| Framework | Next.js 16.2.3 (App Router) |
 | Styling | Tailwind CSS v4 |
 | Database | SQLite via `better-sqlite3` |
 | Payments | NOWPayments API |
@@ -33,7 +33,7 @@ A full-stack hashrate rental marketplace — like NiceHash and Mining Rig Rental
 | `/` | Landing page with hero, algorithm cards, how-it-works, FAQ |
 | `/packages` | Interactive hashrate builder (algorithm, hashrate slider, duration, currency) |
 | `/checkout/[packageId]` | Two-step checkout: enter details → pay with crypto |
-| `/order/[id]` | Order status & payment tracking (auto-refreshes every 15 s) |
+| `/order/[id]` | Order status & payment tracking (auto-refreshes every 15 s while awaiting payment/confirmation) |
 | `/orders` | Customer order lookup by order ID |
 | `/admin` | Admin dashboard — view, filter, and manage all orders (requires login) |
 | `/admin/login` | Admin login page |
@@ -57,11 +57,11 @@ A full-stack hashrate rental marketplace — like NiceHash and Mining Rig Rental
 | `/api/rentals/[rentalId]` | GET | Fetch live MRR rental status (60 s cache) |
 | `/api/health` | GET | Connectivity check for MRR, NOWPayments, and SQLite |
 
-### Admin (require `X-Admin-Key` header matching `ADMIN_API_KEY`)
+### Admin (authorized by session cookie or `X-Admin-Key` header; `/api/admin/login` uses credentials)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/admin/login` | POST | Exchange credentials for a session cookie |
+| `/api/admin/login` | POST | Exchange email + password for a signed session cookie |
 | `/api/orders` | GET | Paginated order listing with optional filters (`status`, `email`, `from`, `to`) |
 | `/api/cron/expire-orders` | POST | Expire overdue orders, delete stale packages, record pricing snapshots |
 | `/api/cron/expiry-reminders` | POST | Send expiry reminder emails for orders expiring within the next hour |
@@ -138,7 +138,7 @@ SMTP_PASS=          # SMTP password / API key
 EMAIL_FROM=         # Sender name and address, e.g. "Miner4 <noreply@miner4.io>"
 ```
 
-> **Demo mode**: The app runs without any API keys configured — pricing, payments, and miner provisioning are simulated so you can explore the UI locally.
+> **Demo mode**: You can explore the UI locally without full configuration, and if SMTP settings are omitted emails are logged to the console in development. However, pricing/package creation and miner provisioning require Mining Rig Rentals API credentials, and real payment creation/webhook verification require NOWPayments credentials.
 
 ## How the Checkout Flow Works
 

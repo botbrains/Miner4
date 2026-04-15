@@ -41,12 +41,6 @@ a confirmed, active rental.
       applied to the worker/payout address field, and the `worker` field sent to
       MRR must be set to a valid address for that coin so payouts are credited to
       the correct wallet.
-- [ ] Solo mining pool selection at checkout – present a curated list of solo
-      mining pools compatible with the selected algorithm (populated from a
-      server-side config or `GET /api/pools?algorithm=<algo>`). The chosen pool's
-      Stratum URL must be sent to MRR as the rental pool config, overriding any
-      default pool. A sensible default pool should be pre-selected so this field
-      remains optional for most users.
 - [ ] Research and catalogue solo mining pools for every supported
       algorithm × coin combination (e.g. SHA-256 / BTC, SHA-256 / BCH,
       Scrypt / LTC, etc.). For each combination, identify a reliable public
@@ -56,6 +50,12 @@ a confirmed, active rental.
       `POST /pool` (MRR API v2) so users can select from MRR's pre-defined
       pool list as well as the app's own curated list. The seed/registration
       script should be idempotent (skip pools already present by name).
+- [ ] Solo mining pool selection at checkout – present a curated list of solo
+      mining pools compatible with the selected algorithm (populated from a
+      server-side config or `GET /api/pools?algorithm=<algo>`). The chosen pool's
+      Stratum URL must be sent to MRR as the rental pool config, overriding any
+      default pool. A sensible default pool should be pre-selected so this field
+      remains optional for most users.
 - [ ] Minimum hashrate floor enforcement per algorithm at the API level
       (currently only enforced by the UI slider)
 - [ ] Show estimated mining start time at checkout (based on average payment

@@ -5,6 +5,52 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ALGORITHM_COLORS, SUPPORTED_CURRENCIES } from '@/types';
 import type { PricingResult } from '@/app/api/pricing/route';
 
+/** Simple SVG line chart for pricing history. */
+function PricingChart({ data }: { data: Array<{ price_usd: number; recorded_at: string }> }) {
+  if (data.length < 2) return null;
+  const W = 600, H = 120, PAD = 16;
+  const prices = data.map(d => d.price_usd);
+  const minP = Math.min(...prices);
+  const maxP = Math.max(...prices);
+  const range = maxP - minP || 1;
+  const pts = data.map((d, i) => {
+    const x = PAD + (i / (data.length - 1)) * (W - PAD * 2);
+    const y = H - PAD - ((d.price_usd - minP) / range) * (H - PAD * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const polyline = pts.join(' ');
+  const latest = prices[prices.length - 1];
+  const earliest = prices[0];
+  const pctChange = ((latest - earliest) / earliest) * 100;
+  const color = pctChange >= 0 ? '#22c55e' : '#ef4444';
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-28">
+        <defs>
+          <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.2" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {/* Fill area */}
+        <polygon
+          points={`${pts[0].split(',')[0]},${H - PAD} ${polyline} ${pts[pts.length - 1].split(',')[0]},${H - PAD}`}
+          fill="url(#chartGrad)"
+        />
+        {/* Line */}
+        <polyline points={polyline} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <div className="flex justify-between text-xs text-gray-500 mt-1">
+        <span>{data[0]?.recorded_at ? new Date(data[0].recorded_at).toLocaleTimeString() : ''}</span>
+        <span className={pctChange >= 0 ? 'text-green-400' : 'text-red-400'}>
+          {pctChange >= 0 ? '+' : ''}{pctChange.toFixed(1)}% over period · latest ${latest.toFixed(2)}
+        </span>
+        <span>{data[data.length - 1]?.recorded_at ? new Date(data[data.length - 1].recorded_at).toLocaleTimeString() : ''}</span>
+      </div>
+    </div>
+  );
+}
+
 const ALGORITHMS: Array<{
   id: string;
   label: string;
@@ -38,6 +84,9 @@ function PackagesBuilder() {
   // Pre-select algorithm from ?algorithm= query param (linked from homepage cards)
   const initialAlgo = ALGORITHMS.find(a => a.id === searchParams.get('algorithm')) ?? ALGORITHMS[0];
 
+  // Error banner from redirect
+  const errorParam = searchParams.get('error');
+
   const [algorithm, setAlgorithm] = useState(initialAlgo);
   const [hashrate, setHashrate]   = useState(initialAlgo.default);
   // Draft text value for the number input so users can type freely without
@@ -49,6 +98,9 @@ function PackagesBuilder() {
   const [pricing, setPricing]         = useState<PricingResult | null>(null);
   const [pricingLoading, setPricingLoading] = useState(false);
   const [pricingError, setPricingError] = useState<string | null>(null);
+
+  // Pricing history
+  const [pricingHistory, setPricingHistory] = useState<Array<{ price_usd: number; recorded_at: string }>>([]);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -110,6 +162,18 @@ function PackagesBuilder() {
     setHashrateInput(String(algo.default));
   };
 
+  // Fetch pricing history whenever algorithm changes
+  useEffect(() => {
+    fetch(`/api/pricing/history?algorithm=${encodeURIComponent(algorithm.id)}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.success && Array.isArray(d.data)) {
+          setPricingHistory((d.data as Array<{ price_usd: number; recorded_at: string }>).reverse());
+        }
+      })
+      .catch(() => {/* ignore */});
+  }, [algorithm.id]);
+
   const handleStartMining = async () => {
     if (!pricing || !pricing.keysConfigured) return;
     setSubmitting(true);
@@ -146,6 +210,26 @@ function PackagesBuilder() {
           Choose your algorithm, set the hashrate and duration. Pricing is calculated live from Mining Rig Rentals.
         </p>
       </div>
+
+      {/* Error banners (redirected from expired/purchased packages) */}
+      {errorParam === 'expired' && (
+        <div className="mb-8 p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20 flex items-center gap-3">
+          <span className="text-xl">⌛</span>
+          <div>
+            <p className="text-yellow-400 font-semibold text-sm">Package Expired</p>
+            <p className="text-gray-400 text-xs mt-0.5">This package is no longer available. Please configure a new one below.</p>
+          </div>
+        </div>
+      )}
+      {errorParam === 'already_purchased' && (
+        <div className="mb-8 p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center gap-3">
+          <span className="text-xl">⚠️</span>
+          <div>
+            <p className="text-red-400 font-semibold text-sm">Package Already Purchased</p>
+            <p className="text-gray-400 text-xs mt-0.5">An order for this package already exists. Please configure a new one below.</p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Builder – left/main column */}
@@ -361,6 +445,14 @@ function PackagesBuilder() {
                   Based on {pricing.availableRigs} available rigs · BTC ≈ ${pricing.btcUsdRate.toLocaleString()}
                 </p>
               )}
+              {pricing?.keysConfigured && pricing.source && (
+                <p className="text-gray-600 text-xs mt-0.5">
+                  {pricing.source === 'algo-suggested'
+                    ? '✦ Price based on MRR suggested rate'
+                    : '✦ Price based on cheapest available rigs'
+                  }
+                </p>
+              )}
             </div>
 
             {submitError && (
@@ -393,6 +485,16 @@ function PackagesBuilder() {
           </div>
         </div>
       </div>
+
+      {/* Pricing history chart */}
+      {pricingHistory.length >= 2 && (
+        <div className="mt-8 bg-gray-900 rounded-2xl border border-gray-800 p-6">
+          <h3 className="text-white font-bold text-base mb-4">
+            {algorithm.label} Price History (last 24h)
+          </h3>
+          <PricingChart data={pricingHistory} />
+        </div>
+      )}
 
       {/* Trust badges */}
       <div className="mt-16 p-6 rounded-2xl border border-gray-800 bg-gray-900/50">

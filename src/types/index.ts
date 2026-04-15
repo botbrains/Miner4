@@ -8,7 +8,20 @@ export interface Package {
   duration_hours: number;
   description: string;
   popular: number;
+  created_at: string;
 }
+
+export const ORDER_STATUSES = [
+  'pending',
+  'awaiting_payment',
+  'active',
+  'provisioning_failed',
+  'expired',
+  'payment_expired',
+  'partially_paid',
+] as const;
+
+export type OrderStatus = typeof ORDER_STATUSES[number];
 
 export interface Order {
   id: string;
@@ -26,9 +39,13 @@ export interface Order {
   payment_amount: number | null;
   payment_id: string | null;
   payment_status: string;
-  status: string;
+  status: OrderStatus | string;
   mrr_rental_id: string | null;
   mrr_rental_ids: string | null;
+  coin: string | null;
+  pool_id: string | null;
+  pool_url: string | null;
+  reminder_sent: number | null;
   expires_at: string | null;
   created_at: string;
   updated_at: string;

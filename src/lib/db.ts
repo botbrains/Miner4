@@ -54,15 +54,57 @@ function initSchema(db: Database.Database) {
       updated_at      TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (package_id) REFERENCES packages(id)
     );
+
+    CREATE TABLE IF NOT EXISTS pricing_history (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      algorithm   TEXT NOT NULL,
+      price_usd   REAL NOT NULL,
+      source      TEXT NOT NULL,
+      btc_rate    REAL NOT NULL,
+      recorded_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
-  // Add mrr_rental_ids column for multi-rig orders (JSON-encoded array of rental IDs).
-  // Use try/catch instead of a PRAGMA pre-check to stay idempotent under concurrency.
+  // Unique index: at most one pricing snapshot per algorithm per calendar hour
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS pricing_history_algo_hour
+      ON pricing_history(algorithm, strftime('%Y-%m-%dT%H', recorded_at));
+  `);
+
+  // Unique index on payment_id for idempotency guard
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS orders_payment_id_unique
+      ON orders(payment_id) WHERE payment_id IS NOT NULL;
+  `);
+
+  // Idempotent column migrations --------------------------------------------------
+
+  // mrr_rental_ids: JSON-encoded array of rental IDs for multi-rig orders
+  addColumnIfMissing(db, 'orders', 'mrr_rental_ids', 'TEXT');
+
+  // coin: the mineable coin chosen at checkout (e.g. 'BTC', 'LTC')
+  addColumnIfMissing(db, 'orders', 'coin', 'TEXT');
+
+  // pool_id / pool_url: solo mining pool chosen at checkout
+  addColumnIfMissing(db, 'orders', 'pool_id', 'TEXT');
+  addColumnIfMissing(db, 'orders', 'pool_url', 'TEXT');
+
+  // reminder_sent: 1 once the 1-hour-before-expiry reminder email has been sent
+  addColumnIfMissing(db, 'orders', 'reminder_sent', 'INTEGER DEFAULT 0');
+}
+
+/** Add a column to a table if it does not already exist (idempotent). */
+function addColumnIfMissing(
+  db: Database.Database,
+  table: string,
+  column: string,
+  definition: string,
+) {
   try {
-    db.exec('ALTER TABLE orders ADD COLUMN mrr_rental_ids TEXT');
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes('duplicate column name: mrr_rental_ids')) {
+    if (!message.includes(`duplicate column name: ${column}`)) {
       throw error;
     }
   }

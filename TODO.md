@@ -100,9 +100,7 @@ a confirmed, active rental.
       exhausted
 - [ ] On partial provisioning failure (multi-rig order), log all already-started
       rental IDs for support visibility; note that MRR rentals are
-      **fixed-duration contracts and cannot be cancelled early** via the API –
-      refunds are issued automatically by MRR only when a rig's hashrate drops
-      below a threshold, not on demand
+      **fixed-duration contracts and cannot be cancelled early** via the API
 
 ---
 
@@ -131,14 +129,6 @@ a confirmed, active rental.
 - [ ] `PATCH /api/orders/:id` – admin-only endpoint (requires valid
       `X-Admin-Key` header) to manually override order status (e.g.,
       force-retry provisioning)
-- [ ] Payment refund workflow – `POST /api/orders/:id/refund` admin-only
-      endpoint (requires valid `X-Admin-Key` header) that triggers a refund
-      via the NOWPayments refund API (for payment-level refunds only, e.g., a
-      failed or unprovisioned order) and updates order status to `refunded`;
-      note that MRR rentals are fixed-duration contracts and do **not** support
-      early termination or API-triggered refunds – MRR refunds are issued
-      automatically by the platform only when a rig's hashrate falls below a
-      threshold
 
 ### 2.3 Rental Extension / Renewal
 - [ ] `POST /api/orders/:id/renew` – create a follow-on order pre-filled with

@@ -39,7 +39,9 @@ export function getCachedRental(rentalId: string): unknown | null {
 
 export function setCachedRental(rentalId: string, data: unknown): void {
   if (cache.size >= MAX_CACHE_SIZE) {
-    // Sweep expired entries first; if still at capacity, evict the oldest
+    // Sweep expired entries first; if still at capacity, evict the oldest.
+    // JavaScript Map preserves insertion order, so keys().next() returns the
+    // earliest-inserted surviving entry (FIFO).
     sweepExpired();
     if (cache.size >= MAX_CACHE_SIZE) {
       const firstKey = cache.keys().next().value;

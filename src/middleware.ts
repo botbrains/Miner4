@@ -30,9 +30,9 @@ async function verifySessionToken(token: string): Promise<boolean> {
   const expected = await hmacSha256Hex(secret, payload);
 
   // Constant-time byte-by-byte comparison to prevent timing attacks
-  const enc2 = new TextEncoder();
-  const sigBytes      = enc2.encode(sig);
-  const expectedBytes = enc2.encode(expected);
+  const encoder = new TextEncoder();
+  const sigBytes      = encoder.encode(sig);
+  const expectedBytes = encoder.encode(expected);
   if (sigBytes.length !== expectedBytes.length) return false;
   let diff = 0;
   for (let i = 0; i < sigBytes.length; i++) {

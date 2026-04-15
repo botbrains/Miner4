@@ -28,10 +28,10 @@ export function isAdminAuthorized(req: Request): boolean {
   const payload  = token.slice(0, dotIndex);
   const sig      = token.slice(dotIndex + 1);
   const expected = createHmac('sha256', secret).update(payload).digest('hex');
-  // Constant-time comparison to prevent timing attacks
-  const expectedBuf = Buffer.from(expected, 'hex');
-  const sigBuf = Buffer.from(sig, 'hex');
-  if (expectedBuf.length !== sigBuf.length || !timingSafeEqual(expectedBuf, sigBuf)) return false;
+  // Constant-time comparison using the hex string bytes to prevent timing attacks.
+  // SHA-256 HMAC hex is always exactly 64 ASCII characters; reject anything else first.
+  if (sig.length !== expected.length) return false;
+  if (!timingSafeEqual(Buffer.from(expected, 'ascii'), Buffer.from(sig, 'ascii'))) return false;
 
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64').toString()) as { exp: number };

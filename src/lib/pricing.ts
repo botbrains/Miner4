@@ -8,6 +8,39 @@ import { getAvailableRigs, getAlgoSuggestedPrice, hasMrrKeys } from '@/lib/mrr';
 
 export const MINER4_FEE_USD = 1.99;
 const MARKUP_MULTIPLIER     = 1.13;   // internal only—never exposed to clients
+const DEFAULT_ALGO_UNITS: Record<string, string> = {
+  'SHA-256': 'TH/s',
+  Ethash: 'MH/s',
+  Scrypt: 'MH/s',
+  X11: 'GH/s',
+  RandomX: 'KH/s',
+};
+
+const UNIT_SCALE: Record<string, number> = {
+  h: 1,
+  kh: 1e3,
+  mh: 1e6,
+  gh: 1e9,
+  th: 1e12,
+  ph: 1e15,
+  eh: 1e18,
+};
+
+function normalizeUnit(unit: string): string {
+  return unit.toLowerCase().replace(/\/s$/, '').replace(/\/$/, '');
+}
+
+function convertHashrateUnits(value: number, fromUnit: string, toUnit: string): number {
+  const fromNorm = normalizeUnit(fromUnit);
+  const toNorm = normalizeUnit(toUnit);
+  if (!fromNorm || !toNorm || fromNorm === toNorm) return value;
+
+  const fromScale = UNIT_SCALE[fromNorm];
+  const toScale = UNIT_SCALE[toNorm];
+  if (!fromScale || !toScale) return value;
+
+  return (value * fromScale) / toScale;
+}
 
 /** Fetch BTC/USD rate from CoinGecko (no API key required). */
 export async function getBtcUsdRate(): Promise<number> {
@@ -52,6 +85,7 @@ export async function computePrice(
   algorithm: string,
   hashrate: number,
   durationHours: number,
+  inputUnit?: string,
 ): Promise<ComputedPrice> {
   const feeUsd = MINER4_FEE_USD;
 
@@ -68,12 +102,14 @@ export async function computePrice(
   ]);
 
   let mrrRatePerHashPerDay: number;
+  let pricingUnit = inputUnit ?? DEFAULT_ALGO_UNITS[algorithm] ?? '';
   let availableRigs = 0;
   let source: ComputedPrice['source'] = 'algo-suggested';
 
   if (algoPrice && algoPrice.btcPerUnitPerDay > 0) {
     // Primary: use MRR's own server-side suggested price for the algorithm
     mrrRatePerHashPerDay = algoPrice.btcPerUnitPerDay;
+    pricingUnit = algoPrice.unit || pricingUnit;
   } else {
     // Fallback: derive minimum price from available rigs
     source = 'rig-fallback';
@@ -98,10 +134,13 @@ export async function computePrice(
     }
 
     mrrRatePerHashPerDay = Math.min(...prices);
+    pricingUnit = rigs.find(r => Number.isFinite(r.hashrate?.advertised?.hash) && r.hashrate?.advertised?.hash > 0)?.hashrate?.advertised?.type ?? pricingUnit;
   }
 
+  const sourceUnit = inputUnit ?? DEFAULT_ALGO_UNITS[algorithm] ?? pricingUnit;
+  const pricedHashrate = convertHashrateUnits(hashrate, sourceUnit, pricingUnit);
   const durationDays  = durationHours / 24;
-  const mrrCostBtc    = mrrRatePerHashPerDay * hashrate * durationDays;
+  const mrrCostBtc    = mrrRatePerHashPerDay * pricedHashrate * durationDays;
   const mrrCostUsd    = mrrCostBtc * btcUsdRate;
   const totalUsd      = +(mrrCostUsd * MARKUP_MULTIPLIER + feeUsd).toFixed(2);
 

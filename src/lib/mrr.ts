@@ -457,6 +457,8 @@ export interface MrrAlgoSuggestedPrice {
   btcPerUnitPerDay: number;
   /** Hash unit as returned by MRR (e.g. 'TH', 'MH') */
   unit: string;
+  /** Current rented hash reported by MRR for this algorithm. */
+  currentRentedHash?: number;
 }
 
 /**
@@ -530,6 +532,7 @@ export async function getAlgoSuggestedPrice(algorithm: string): Promise<MrrAlgoS
   type AlgoEntry = {
     name: string;
     display?: string;
+    current_rented_hash?: number | string;
     suggested_price?: {
       amount?: number | string;
       currency?: string;
@@ -537,28 +540,39 @@ export async function getAlgoSuggestedPrice(algorithm: string): Promise<MrrAlgoS
     };
   };
 
-  type AlgosResponse = {
+  type AlgoResponse = {
     success: boolean;
-    data: AlgoEntry[] | { records?: AlgoEntry[] };
+    data: AlgoEntry | { record?: AlgoEntry } | AlgoEntry[] | { records?: AlgoEntry[] };
   };
 
   try {
-    const res = await mrrRequest<AlgosResponse>('GET', '/info/algos');
+    // Preferred endpoint for authoritative per-algo stats:
+    // GET /info/algos/[NAME]
+    const res = await mrrRequest<AlgoResponse>('GET', `/info/algos/${encodeURIComponent(mrrAlgo)}`);
     if (!res.success) return null;
 
-    const records: AlgoEntry[] = Array.isArray(res.data)
-      ? res.data
-      : ((res.data as { records?: AlgoEntry[] }).records ?? []);
-
-    const entry = records.find(a => a.name === mrrAlgo);
+    const data = res.data;
+    const entry = Array.isArray(data)
+      ? data.find(a => a.name === mrrAlgo)
+      : ('record' in (data as { record?: AlgoEntry })
+        ? (data as { record?: AlgoEntry }).record
+        : ('records' in (data as { records?: AlgoEntry[] })
+          ? (data as { records?: AlgoEntry[] }).records?.find(a => a.name === mrrAlgo)
+          : (data as AlgoEntry)));
     if (!entry?.suggested_price) return null;
 
-    const amount = parseNum(entry.suggested_price.amount);
-    const unit   = entry.suggested_price.unit ?? '';
+    const amount            = parseNum(entry.suggested_price.amount);
+    const unit              = entry.suggested_price.unit ?? '';
+    const currentRentedHash = parseNum(entry.current_rented_hash);
 
     if (!Number.isFinite(amount) || amount <= 0) return null;
 
-    return { name: mrrAlgo, btcPerUnitPerDay: amount, unit };
+    return {
+      name: mrrAlgo,
+      btcPerUnitPerDay: amount,
+      unit,
+      ...(Number.isFinite(currentRentedHash) ? { currentRentedHash } : {}),
+    };
   } catch {
     // Non-fatal: caller should fall back to rig-based pricing
     return null;

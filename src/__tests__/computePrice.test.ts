@@ -72,6 +72,40 @@ describe('computePrice', () => {
     expect(mockGetAvailableRigs).toHaveBeenCalled();
   });
 
+  it('converts hashrate units when suggested-price unit differs from input unit', async () => {
+    // 0.1 BTC / PH / day with BTC=60k.
+    // 100 TH/s = 0.1 PH/s, so base USD should be 600 before markup/fee.
+    mockGetAlgoSuggestedPrice.mockResolvedValue({
+      name: 'sha256',
+      btcPerUnitPerDay: 0.1,
+      unit: 'PH',
+    });
+
+    const result = await computePrice('SHA-256', 100, 24, 'TH/s');
+    expect(result.source).toBe('algo-suggested');
+    const expected = +((0.1 * 0.1 * result.btcUsdRate) * 1.13 + result.feeUsd).toFixed(2);
+    expect(result.totalUsd).toBe(expected);
+  });
+
+  it('converts hashrate units on rig-fallback pricing path', async () => {
+    mockGetAlgoSuggestedPrice.mockResolvedValue(null);
+    mockGetAvailableRigs.mockResolvedValue([
+      {
+        id: 1,
+        name: 'ph-rig',
+        type: 'sha256',
+        status: { status: 'available' },
+        hashrate: { advertised: { hash: 1, type: 'PH/s' } },
+        price: { BTC: { price: 0.1 } }, // 0.1 BTC per PH/day
+      },
+    ]);
+
+    const result = await computePrice('SHA-256', 100, 24, 'TH/s');
+    expect(result.source).toBe('rig-fallback');
+    const expected = +((0.1 * 0.1 * result.btcUsdRate) * 1.13 + result.feeUsd).toFixed(2);
+    expect(result.totalUsd).toBe(expected);
+  });
+
   it('throws when both suggested price and rigs are unavailable', async () => {
     mockGetAlgoSuggestedPrice.mockResolvedValue(null);
     mockGetAvailableRigs.mockResolvedValue([]);

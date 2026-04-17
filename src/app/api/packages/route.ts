@@ -94,7 +94,7 @@ export async function POST(req: Request) {
     // Compute the authoritative price entirely on the server.
     let priceUsd: number;
     try {
-      const price = await computePrice(algorithm, hashrate, durationHours, unit);
+      const price = await computePrice(algorithm, hashrate, durationHours);
       if (!price.keysConfigured) {
         return NextResponse.json(
           { success: false, error: 'Pricing service is not configured' },

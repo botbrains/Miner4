@@ -8,7 +8,7 @@ import { getAvailableRigs, hasMrrKeys } from '@/lib/mrr';
 
 export const MINER4_FEE_USD = 1.99;
 const MARKUP_MULTIPLIER     = 1.13;   // internal only—never exposed to clients
-const DEFAULT_ALGO_UNITS: Record<string, string> = {
+export const DEFAULT_ALGO_UNITS: Record<string, string> = {
   'SHA-256': 'TH/s',
   Ethash: 'MH/s',
   Scrypt: 'MH/s',

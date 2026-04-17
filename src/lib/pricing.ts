@@ -30,8 +30,8 @@ function normalizeUnit(unit: string): string {
   return unit
     .toLowerCase()
     .replace(/\s+/g, '')
-    .replace(/\/(s|sec|second|seconds)$/, '')
-    .replace(/\/(d|day|days)$/, '')
+    .replace(/\/(s|sec|second|seconds)\/?$/, '')
+    .replace(/\/(d|day|days)\/?$/, '')
     .replace(/\/$/, '');
 }
 

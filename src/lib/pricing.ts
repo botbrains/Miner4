@@ -27,7 +27,12 @@ const UNIT_SCALE: Record<string, number> = {
 };
 
 function normalizeUnit(unit: string): string {
-  return unit.toLowerCase().replace(/\/s$/, '').replace(/\/$/, '');
+  return unit
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/\/(s|sec|second|seconds)$/, '')
+    .replace(/\/(d|day|days)$/, '')
+    .replace(/\/$/, '');
 }
 
 function convertHashrateUnits(value: number, fromUnit: string, toUnit: string): number {

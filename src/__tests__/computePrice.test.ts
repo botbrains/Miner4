@@ -4,9 +4,8 @@ import type { ComputedPrice } from '@/lib/pricing';
 // We mock at the module level before importing computePrice so the mocks
 // are in place when the module is first evaluated.
 vi.mock('@/lib/mrr', () => ({
-  hasMrrKeys:          vi.fn(),
-  getAlgoSuggestedPrice: vi.fn(),
-  getAvailableRigs:    vi.fn(),
+  hasMrrKeys:       vi.fn(),
+  getAvailableRigs: vi.fn(),
 }));
 
 vi.mock('@/lib/pricing', async (importOriginal) => {
@@ -18,12 +17,11 @@ vi.mock('@/lib/pricing', async (importOriginal) => {
 });
 
 import { computePrice, getBtcUsdRate } from '@/lib/pricing';
-import { hasMrrKeys, getAlgoSuggestedPrice, getAvailableRigs } from '@/lib/mrr';
+import { hasMrrKeys, getAvailableRigs } from '@/lib/mrr';
 
-const mockHasMrrKeys          = vi.mocked(hasMrrKeys);
-const mockGetAlgoSuggestedPrice = vi.mocked(getAlgoSuggestedPrice);
-const mockGetAvailableRigs    = vi.mocked(getAvailableRigs);
-const mockGetBtcUsdRate       = vi.mocked(getBtcUsdRate);
+const mockHasMrrKeys       = vi.mocked(hasMrrKeys);
+const mockGetAvailableRigs = vi.mocked(getAvailableRigs);
+const mockGetBtcUsdRate    = vi.mocked(getBtcUsdRate);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -40,21 +38,7 @@ describe('computePrice', () => {
     expect(result.source).toBe('unconfigured');
   });
 
-  it('uses algo-suggested price path when getAlgoSuggestedPrice returns a value', async () => {
-    // 0.0001 BTC per TH/s per day
-    mockGetAlgoSuggestedPrice.mockResolvedValue({ btcPerUnitPerDay: 0.0001 } as Awaited<ReturnType<typeof getAlgoSuggestedPrice>>);
-    const result = await computePrice('SHA-256', 100, 24);
-
-    expect(result.keysConfigured).toBe(true);
-    expect(result.source).toBe('algo-suggested');
-    // Ensure getAvailableRigs was NOT called in this path
-    expect(mockGetAvailableRigs).not.toHaveBeenCalled();
-    // Sanity-check: price should be > fee
-    expect(result.totalUsd).toBeGreaterThan(result.feeUsd);
-  });
-
-  it('falls back to rig-based pricing when getAlgoSuggestedPrice returns null', async () => {
-    mockGetAlgoSuggestedPrice.mockResolvedValue(null);
+  it('uses rig-based pricing when rigs are available', async () => {
     mockGetAvailableRigs.mockResolvedValue([
       {
         id: 1,
@@ -68,65 +52,15 @@ describe('computePrice', () => {
 
     const result = await computePrice('SHA-256', 100, 24);
     expect(result.keysConfigured).toBe(true);
-    expect(result.source).toBe('rig-fallback');
+    expect(result.source).toBe('rigs');
     expect(mockGetAvailableRigs).toHaveBeenCalled();
+    // Sanity-check: price should be > fee
+    expect(result.totalUsd).toBeGreaterThan(result.feeUsd);
   });
 
-  it('converts hashrate units when suggested-price unit differs from input unit', async () => {
+  it('converts hashrate units when rig unit differs from input unit', async () => {
     // 0.1 BTC / PH / day with BTC=60k.
     // 100 TH/s = 0.1 PH/s, so base USD should be 600 before markup/fee.
-    mockGetAlgoSuggestedPrice.mockResolvedValue({
-      name: 'sha256',
-      btcPerUnitPerDay: 0.1,
-      unit: 'PH',
-    });
-
-    const result = await computePrice('SHA-256', 100, 24, 'TH/s');
-    expect(result.source).toBe('algo-suggested');
-    const expected = +((0.1 * 0.1 * result.btcUsdRate) * 1.13 + result.feeUsd).toFixed(2);
-    expect(result.totalUsd).toBe(expected);
-  });
-
-  it('handles suggested-price units expressed as PH/day for SHA-256', async () => {
-    mockGetAlgoSuggestedPrice.mockResolvedValue({
-      name: 'sha256',
-      btcPerUnitPerDay: 0.1,
-      unit: 'PH/day',
-    });
-
-    const result = await computePrice('SHA-256', 100, 24, 'TH/s');
-    expect(result.source).toBe('algo-suggested');
-    const expected = +((0.1 * 0.1 * result.btcUsdRate) * 1.13 + result.feeUsd).toFixed(2);
-    expect(result.totalUsd).toBe(expected);
-  });
-
-
-  it('handles suggested-price units expressed as Price/PH/Day for SHA-256', async () => {
-    mockGetAlgoSuggestedPrice.mockResolvedValue({
-      name: 'sha256',
-      btcPerUnitPerDay: 0.1,
-      unit: 'Price/PH/Day',
-    });
-
-    const result = await computePrice('SHA-256', 100, 24, 'TH/s');
-    expect(result.source).toBe('algo-suggested');
-    const expected = +((0.1 * 0.1 * result.btcUsdRate) * 1.13 + result.feeUsd).toFixed(2);
-    expect(result.totalUsd).toBe(expected);
-  });
-  it('handles suggested-price units expressed as PH/day/ for SHA-256', async () => {
-    mockGetAlgoSuggestedPrice.mockResolvedValue({
-      name: 'sha256',
-      btcPerUnitPerDay: 0.1,
-      unit: 'PH/day/',
-    });
-
-    const result = await computePrice('SHA-256', 100, 24, 'TH/s');
-    expect(result.source).toBe('algo-suggested');
-    const expected = +((0.1 * 0.1 * result.btcUsdRate) * 1.13 + result.feeUsd).toFixed(2);
-    expect(result.totalUsd).toBe(expected);
-  });
-  it('converts hashrate units on rig-fallback pricing path', async () => {
-    mockGetAlgoSuggestedPrice.mockResolvedValue(null);
     mockGetAvailableRigs.mockResolvedValue([
       {
         id: 1,
@@ -139,13 +73,12 @@ describe('computePrice', () => {
     ]);
 
     const result = await computePrice('SHA-256', 100, 24, 'TH/s');
-    expect(result.source).toBe('rig-fallback');
+    expect(result.source).toBe('rigs');
     const expected = +((0.1 * 0.1 * result.btcUsdRate) * 1.13 + result.feeUsd).toFixed(2);
     expect(result.totalUsd).toBe(expected);
   });
 
-  it('throws when both suggested price and rigs are unavailable', async () => {
-    mockGetAlgoSuggestedPrice.mockResolvedValue(null);
+  it('throws when no rigs are available', async () => {
     mockGetAvailableRigs.mockResolvedValue([]);
 
     await expect(computePrice('SHA-256', 100, 24)).rejects.toThrow(/no available rigs/i);

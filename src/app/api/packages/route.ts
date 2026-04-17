@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { computePrice } from '@/lib/pricing';
+import { computePrice, DEFAULT_ALGO_UNITS } from '@/lib/pricing';
 import { getAlgoInfoList, hasMrrKeys, toMrrAlgoName } from '@/lib/mrr';
 import { randomUUID } from 'crypto';
 import { checkRateLimit } from '@/lib/rateLimit';
@@ -71,7 +71,12 @@ export async function POST(req: Request) {
       );
     }
 
-    const unit = algoInfo.unit ? `${algoInfo.unit}/s` : '';
+    // Derive the user-facing hashrate unit from the algorithm allowlist.
+    // algoInfo.unit is MRR's pricing denomination (e.g. 'PH*DAY'), which is not
+    // the hashrate unit the user configured. DEFAULT_ALGO_UNITS is the
+    // authoritative map of algorithm → display unit (e.g. 'SHA-256' → 'TH/s')
+    // and matches the units used by both the UI slider and GET /api/pricing.
+    const unit = DEFAULT_ALGO_UNITS[algorithm] ?? '';
 
     if (!Number.isFinite(hashrate) || hashrate <= 0 || !Number.isFinite(durationHours) || durationHours <= 0) {
       return NextResponse.json(

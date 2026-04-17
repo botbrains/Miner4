@@ -76,7 +76,13 @@ export async function POST(req: Request) {
     // the hashrate unit the user configured. DEFAULT_ALGO_UNITS is the
     // authoritative map of algorithm → display unit (e.g. 'SHA-256' → 'TH/s')
     // and matches the units used by both the UI slider and GET /api/pricing.
-    const unit = DEFAULT_ALGO_UNITS[algorithm] ?? '';
+    const unit = DEFAULT_ALGO_UNITS[algorithm];
+    if (!unit) {
+      return NextResponse.json(
+        { success: false, error: `Algorithm unit not configured: ${algorithm}` },
+        { status: 400 },
+      );
+    }
 
     if (!Number.isFinite(hashrate) || hashrate <= 0 || !Number.isFinite(durationHours) || durationHours <= 0) {
       return NextResponse.json(

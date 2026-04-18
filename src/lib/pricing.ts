@@ -7,7 +7,8 @@
 import { getAvailableRigs, hasMrrKeys } from '@/lib/mrr';
 
 export const MINER4_FEE_USD = 1.99;
-const MARKUP_MULTIPLIER     = 1.13;   // internal only—never exposed to clients
+export const DEV_MARKUP_RATE = 0.13;
+const MARKUP_MULTIPLIER     = 1 + DEV_MARKUP_RATE;   // internal only—never exposed to clients
 export const DEFAULT_ALGO_UNITS: Record<string, string> = {
   'SHA-256': 'TH/s',
   Ethash: 'MH/s',
@@ -77,6 +78,10 @@ export interface ComputedPrice {
   source: 'rigs' | 'unconfigured';
 }
 
+function computeCustomerTotalUsd(mrrCostUsd: number, feeUsd: number): number {
+  return +(mrrCostUsd * MARKUP_MULTIPLIER + feeUsd).toFixed(2);
+}
+
  /**
  * Compute the customer-facing price for a hashrate rental entirely on the
  * server.  Never accepts a price from the client.
@@ -134,7 +139,10 @@ export async function computePrice(
   const durationDays  = durationHours / 24;
   const mrrCostBtc    = mrrRatePerHashPerDay * pricedHashrate * durationDays;
   const mrrCostUsd    = mrrCostBtc * btcUsdRate;
-  const totalUsd      = +(mrrCostUsd * MARKUP_MULTIPLIER + feeUsd).toFixed(2);
+  // Final customer price includes:
+  // - 13% internal markup for dev/ops costs (intentionally not surfaced as a line item)
+  // - fixed Miner4 service fee
+  const totalUsd      = computeCustomerTotalUsd(mrrCostUsd, feeUsd);
 
   return {
     totalUsd,

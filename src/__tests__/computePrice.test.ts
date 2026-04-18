@@ -16,7 +16,7 @@ vi.mock('@/lib/pricing', async (importOriginal) => {
   };
 });
 
-import { computePrice, getBtcUsdRate } from '@/lib/pricing';
+import { computePrice, getBtcUsdRate, DEV_MARKUP_RATE, MINER4_FEE_USD } from '@/lib/pricing';
 import { hasMrrKeys, getAvailableRigs } from '@/lib/mrr';
 
 const mockHasMrrKeys       = vi.mocked(hasMrrKeys);
@@ -58,6 +58,27 @@ describe('computePrice', () => {
     expect(result.totalUsd).toBeGreaterThan(result.feeUsd);
   });
 
+  it('applies the fixed service fee and hidden 13% markup', async () => {
+    // 100 TH/s for 24h at 0.001 BTC per 100 TH/day => 0.001 BTC/day.
+    // At $60,000/BTC this is $60 base cost.
+    mockGetAvailableRigs.mockResolvedValue([
+      {
+        id: 1,
+        name: 'markup-rig',
+        type: 'sha256',
+        status: { status: 'available' },
+        hashrate: { advertised: { hash: 100, type: 'TH/s' } },
+        price: { BTC: { price: 0.001 } },
+      },
+    ]);
+
+    const result = await computePrice('SHA-256', 100, 24, 'TH/s');
+    const expected = +((0.001 * result.btcUsdRate * (1 + DEV_MARKUP_RATE)) + MINER4_FEE_USD).toFixed(2);
+
+    expect(result.feeUsd).toBe(MINER4_FEE_USD);
+    expect(result.totalUsd).toBe(expected);
+  });
+
   it('converts hashrate units when rig unit differs from input unit', async () => {
     // 0.1 BTC / PH / day with BTC=60k.
     // 100 TH/s = 0.1 PH/s, so base USD should be 600 before markup/fee.
@@ -74,7 +95,7 @@ describe('computePrice', () => {
 
     const result = await computePrice('SHA-256', 100, 24, 'TH/s');
     expect(result.source).toBe('rigs');
-    const expected = +((0.1 * 0.1 * result.btcUsdRate) * 1.13 + result.feeUsd).toFixed(2);
+    const expected = +((0.1 * 0.1 * result.btcUsdRate) * (1 + DEV_MARKUP_RATE) + result.feeUsd).toFixed(2);
     expect(result.totalUsd).toBe(expected);
   });
 

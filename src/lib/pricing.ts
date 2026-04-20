@@ -4,7 +4,7 @@
  * client-visible code.
  */
 
-import { getAvailableRigs, hasMrrKeys } from '@/lib/mrr';
+import { getAvailableRigs, hasMrrKeys, selectRigsForHashrate } from '@/lib/mrr';
 
 export const MINER4_FEE_USD = 1.99;
 export const DEV_MARKUP_RATE = 0.13;
@@ -110,34 +110,58 @@ export async function computePrice(
     getBtcUsdRate(),
   ]);
 
-  let mrrRatePerHashPerDay = 0;
-  let pricingUnit = inputUnit ?? DEFAULT_ALGO_UNITS[algorithm] ?? '';
+  let mrrCostBtc = 0;
   const availableRigs = rigs.length;
 
   if (!rigs.length) {
     throw new Error(`No available rigs found for algorithm: ${algorithm}`);
   }
 
-  const prices = rigs
-    .map(r => {
-      const price              = r.price?.BTC?.price;
-      const advertisedHashrate = r.hashrate?.advertised?.hash;
-      if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(advertisedHashrate) || advertisedHashrate <= 0) return NaN;
-      return price / advertisedHashrate;
-    })
-    .filter((p): p is number => Number.isFinite(p) && p > 0);
+  const pricedRigs = rigs.filter((r) => {
+    const price = r.price?.BTC?.price;
+    const advertisedHashrate = r.hashrate?.advertised?.hash;
+    return (
+      Number.isFinite(price) &&
+      price > 0 &&
+      Number.isFinite(advertisedHashrate) &&
+      advertisedHashrate > 0
+    );
+  });
 
-  if (!prices.length) {
+  if (!pricedRigs.length) {
     throw new Error(`No priced rigs available for algorithm: ${algorithm}`);
   }
 
-  mrrRatePerHashPerDay = Math.min(...prices);
-  pricingUnit = rigs.find(r => Number.isFinite(r.hashrate?.advertised?.hash) && r.hashrate?.advertised?.hash > 0)?.hashrate?.advertised?.type ?? pricingUnit;
-
-  const sourceUnit = inputUnit ?? DEFAULT_ALGO_UNITS[algorithm] ?? pricingUnit;
-  const pricedHashrate = convertHashrateUnits(hashrate, sourceUnit, pricingUnit);
+  const sourceUnit = inputUnit ?? DEFAULT_ALGO_UNITS[algorithm] ?? '';
   const durationDays  = durationHours / 24;
-  const mrrCostBtc    = mrrRatePerHashPerDay * pricedHashrate * durationDays;
+
+  const rigUnits = [...new Set(
+    pricedRigs
+      .map(r => r.hashrate?.advertised?.type)
+      .filter((unit): unit is string => typeof unit === 'string' && unit.trim().length > 0),
+  )];
+
+  let bestRigSelectionCostBtc: number | null = null;
+  for (const rigUnit of rigUnits) {
+    const requiredHashrate = convertHashrateUnits(hashrate, sourceUnit, rigUnit);
+    if (!Number.isFinite(requiredHashrate) || requiredHashrate <= 0) continue;
+
+    const selected = selectRigsForHashrate(pricedRigs, requiredHashrate, rigUnit);
+    if (!selected || selected.length === 0) continue;
+
+    const selectionCostBtc = selected.reduce((sum, rig) => sum + rig.price.BTC.price, 0) * durationDays;
+    if (!Number.isFinite(selectionCostBtc) || selectionCostBtc <= 0) continue;
+
+    if (bestRigSelectionCostBtc === null || selectionCostBtc < bestRigSelectionCostBtc) {
+      bestRigSelectionCostBtc = selectionCostBtc;
+    }
+  }
+
+  if (bestRigSelectionCostBtc === null) {
+    throw new Error(`No rig combination can satisfy hashrate for algorithm: ${algorithm}`);
+  }
+
+  mrrCostBtc = bestRigSelectionCostBtc;
   const mrrCostUsd    = mrrCostBtc * btcUsdRate;
   // Final customer price includes:
   // - 13% internal markup for dev/ops costs (intentionally not surfaced as a line item)

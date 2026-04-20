@@ -3,10 +3,14 @@ import type { ComputedPrice } from '@/lib/pricing';
 
 // We mock at the module level before importing computePrice so the mocks
 // are in place when the module is first evaluated.
-vi.mock('@/lib/mrr', () => ({
-  hasMrrKeys:       vi.fn(),
-  getAvailableRigs: vi.fn(),
-}));
+vi.mock('@/lib/mrr', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/mrr')>();
+  return {
+    ...actual,
+    hasMrrKeys: vi.fn(),
+    getAvailableRigs: vi.fn(),
+  };
+});
 
 vi.mock('@/lib/pricing', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/pricing')>();
@@ -79,9 +83,9 @@ describe('computePrice', () => {
     expect(result.totalUsd).toBe(expected);
   });
 
-  it('converts hashrate units when rig unit differs from input unit', async () => {
-    // 0.1 BTC / PH / day with BTC=60k.
-    // 100 TH/s = 0.1 PH/s, so base USD should be 600 before markup/fee.
+  it('uses per-rig pricing when rig unit differs from input unit', async () => {
+    // Per-rig pricing: one 1 PH/s rig priced at 0.1 BTC/day is required to satisfy
+    // 100 TH/s (0.1 PH/s) because rentals are charged by full rig.
     mockGetAvailableRigs.mockResolvedValue([
       {
         id: 1,
@@ -89,13 +93,40 @@ describe('computePrice', () => {
         type: 'sha256',
         status: { status: 'available' },
         hashrate: { advertised: { hash: 1, type: 'PH/s' } },
-        price: { BTC: { price: 0.1 } }, // 0.1 BTC per PH/day
+        price: { BTC: { price: 0.1 } }, // 0.1 BTC per rig/day
       },
     ]);
 
     const result = await computePrice('SHA-256', 100, 24, 'TH/s');
     expect(result.source).toBe('rigs');
-    const expected = +((0.1 * 0.1 * result.btcUsdRate) * (1 + DEV_MARKUP_RATE) + result.feeUsd).toFixed(2);
+    const expected = +((0.1 * result.btcUsdRate) * (1 + DEV_MARKUP_RATE) + result.feeUsd).toFixed(2);
+    expect(result.totalUsd).toBe(expected);
+  });
+
+  it('sums selected rig prices for multi-rig orders', async () => {
+    mockGetAvailableRigs.mockResolvedValue([
+      {
+        id: 1,
+        name: 'rig-1',
+        type: 'sha256',
+        status: { status: 'available' },
+        hashrate: { advertised: { hash: 60, type: 'TH/s' } },
+        price: { BTC: { price: 0.001 } },
+      },
+      {
+        id: 2,
+        name: 'rig-2',
+        type: 'sha256',
+        status: { status: 'available' },
+        hashrate: { advertised: { hash: 50, type: 'TH/s' } },
+        price: { BTC: { price: 0.0012 } },
+      },
+    ]);
+
+    // Need 100 TH/s. No single rig is within ±5%, so both rigs are selected.
+    const result = await computePrice('SHA-256', 100, 24, 'TH/s');
+    const expectedRigCostBtc = 0.001 + 0.0012;
+    const expected = +((expectedRigCostBtc * result.btcUsdRate) * (1 + DEV_MARKUP_RATE) + result.feeUsd).toFixed(2);
     expect(result.totalUsd).toBe(expected);
   });
 

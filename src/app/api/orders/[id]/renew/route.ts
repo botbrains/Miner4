@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { computePrice } from '@/lib/pricing';
+import { computePrice, DEFAULT_ALGO_UNITS } from '@/lib/pricing';
 import { randomUUID } from 'crypto';
 
 export const dynamic = 'force-dynamic';
@@ -53,10 +53,12 @@ export async function POST(
       );
     }
 
+    const displayUnit = DEFAULT_ALGO_UNITS[original.algorithm] ?? original.unit;
+
     // Compute live pricing for the renewal package
     let priceUsd: number;
     try {
-      const price = await computePrice(original.algorithm, original.hashrate, original.duration_hours, original.unit);
+      const price = await computePrice(original.algorithm, original.hashrate, original.duration_hours, displayUnit);
       if (!price.keysConfigured) {
         return NextResponse.json({ success: false, error: 'Pricing service is not configured' }, { status: 503 });
       }
@@ -68,13 +70,13 @@ export async function POST(
 
     // Create a new package record (the order is created by the checkout flow)
     const packageId = randomUUID();
-    const name = `${original.algorithm} – ${original.hashrate.toLocaleString()} ${original.unit} / ${original.duration_hours}h`;
-    const description = `Custom ${original.algorithm} renewal: ${original.hashrate.toLocaleString()} ${original.unit} for ${original.duration_hours} hours.`;
+    const name = `${original.algorithm} – ${original.hashrate.toLocaleString()} ${displayUnit} / ${original.duration_hours}h`;
+    const description = `Custom ${original.algorithm} renewal: ${original.hashrate.toLocaleString()} ${displayUnit} for ${original.duration_hours} hours.`;
 
     db.prepare(`
       INSERT INTO packages (id, name, algorithm, hashrate, unit, price_usd, duration_hours, description, popular)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-    `).run(packageId, name, original.algorithm, original.hashrate, original.unit, priceUsd, original.duration_hours, description);
+    `).run(packageId, name, original.algorithm, original.hashrate, displayUnit, priceUsd, original.duration_hours, description);
 
     return NextResponse.json({
       success: true,

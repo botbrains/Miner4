@@ -75,7 +75,7 @@ export interface ComputedPrice {
   availableRigs: number;
   keysConfigured: boolean;
   /** Indicates which pricing path was used. */
-  source: 'rigs' | 'unconfigured';
+  source: 'rigs' | 'unconfigured' | 'algo-suggested';
 }
 
 function computeCustomerTotalUsd(mrrCostUsd: number, feeUsd: number): number {

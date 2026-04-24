@@ -2,8 +2,14 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-const DB_DIR = path.join(process.cwd(), 'data');
-const DB_PATH = path.join(DB_DIR, 'miner4.db');
+// In Vercel/Lambda the CWD (/var/task) is read-only; use /tmp instead.
+// A DB_PATH env var can override the location entirely (e.g. for a persistent volume).
+const DB_DIR = process.env.DB_PATH
+  ? path.dirname(process.env.DB_PATH)
+  : process.env.VERCEL
+    ? '/tmp'
+    : path.join(process.cwd(), 'data');
+const DB_PATH = process.env.DB_PATH || path.join(DB_DIR, 'miner4.db');
 
 let db: Database.Database | null = null;
 

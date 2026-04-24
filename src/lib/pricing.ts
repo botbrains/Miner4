@@ -4,11 +4,12 @@
  * client-visible code.
  */
 
-import { getAvailableRigs, getAlgoSuggestedPrice, hasMrrKeys } from '@/lib/mrr';
+import { getAvailableRigs, hasMrrKeys, selectRigsForHashrate } from '@/lib/mrr';
 
 export const MINER4_FEE_USD = 1.99;
-const MARKUP_MULTIPLIER     = 1.13;   // internal only—never exposed to clients
-const DEFAULT_ALGO_UNITS: Record<string, string> = {
+export const DEV_MARKUP_RATE = 0.13;
+const MARKUP_MULTIPLIER     = 1 + DEV_MARKUP_RATE;   // internal only—never exposed to clients
+export const DEFAULT_ALGO_UNITS: Record<string, string> = {
   'SHA-256': 'TH/s',
   Ethash: 'MH/s',
   Scrypt: 'MH/s',
@@ -74,7 +75,11 @@ export interface ComputedPrice {
   availableRigs: number;
   keysConfigured: boolean;
   /** Indicates which pricing path was used. */
-  source: 'algo-suggested' | 'rig-fallback' | 'unconfigured';
+  source: 'rigs' | 'unconfigured';
+}
+
+function computeCustomerTotalUsd(mrrCostUsd: number, feeUsd: number): number {
+  return +(mrrCostUsd * MARKUP_MULTIPLIER + feeUsd).toFixed(2);
 }
 
  /**
@@ -82,12 +87,8 @@ export interface ComputedPrice {
  * server.  Never accepts a price from the client.
  *
  * Pricing strategy (MRR API v2):
- * 1. Primary:  use GET /info/algos to get the MRR-suggested price for the
- *    algorithm — this is the server-side pricing endpoint recommended by MRR.
- *    This is fetched in parallel with the BTC/USD rate.
- * 2. Fallback: only if /info/algos returns no usable price, call GET /rig to
- *    derive the minimum price from available rigs. The rig-listing call is
- *    deferred to this path so it is never made when /info/algos succeeds.
+ * Fetch available rigs via GET /rig and derive the minimum BTC-per-hash-unit
+ * per day from their advertised prices. The BTC/USD rate is fetched concurrently.
  *
  * @throws if MRR keys are configured but no pricing data is available.
  */
@@ -103,56 +104,69 @@ export async function computePrice(
     return { totalUsd: 0, feeUsd, btcUsdRate: 0, availableRigs: 0, keysConfigured: false, source: 'unconfigured' };
   }
 
-  // Fetch the suggested algo price and BTC rate concurrently.
-  // The rig-listing call is intentionally deferred to the fallback path
-  // to avoid the overhead of a heavy /rig request when /info/algos succeeds.
-  const [algoPrice, btcUsdRate] = await Promise.all([
-    getAlgoSuggestedPrice(algorithm),
+  // Fetch available rigs and BTC rate concurrently.
+  const [rigs, btcUsdRate] = await Promise.all([
+    getAvailableRigs(algorithm),
     getBtcUsdRate(),
   ]);
 
-  let mrrRatePerHashPerDay: number;
-  let pricingUnit = inputUnit ?? DEFAULT_ALGO_UNITS[algorithm] ?? '';
-  let availableRigs = 0;
-  let source: ComputedPrice['source'] = 'algo-suggested';
+  let mrrCostBtc = 0;
+  const availableRigs = rigs.length;
 
-  if (algoPrice && algoPrice.btcPerUnitPerDay > 0) {
-    // Primary: use MRR's own server-side suggested price for the algorithm
-    mrrRatePerHashPerDay = algoPrice.btcPerUnitPerDay;
-    pricingUnit = algoPrice.unit || pricingUnit;
-  } else {
-    // Fallback: derive minimum price from available rigs
-    source = 'rig-fallback';
-    const rigs = await getAvailableRigs(algorithm);
-    availableRigs = rigs.length;
-
-    if (!rigs.length) {
-      throw new Error(`No available rigs found for algorithm: ${algorithm}`);
-    }
-
-    const prices = rigs
-      .map(r => {
-        const price            = r.price?.BTC?.price;
-        const advertisedHashrate = r.hashrate?.advertised?.hash;
-        if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(advertisedHashrate) || advertisedHashrate <= 0) return NaN;
-        return price / advertisedHashrate;
-      })
-      .filter((p): p is number => Number.isFinite(p) && p > 0);
-
-    if (!prices.length) {
-      throw new Error(`No priced rigs available for algorithm: ${algorithm}`);
-    }
-
-    mrrRatePerHashPerDay = Math.min(...prices);
-    pricingUnit = rigs.find(r => Number.isFinite(r.hashrate?.advertised?.hash) && r.hashrate?.advertised?.hash > 0)?.hashrate?.advertised?.type ?? pricingUnit;
+  if (!rigs.length) {
+    throw new Error(`No available rigs found for algorithm: ${algorithm}`);
   }
 
-  const sourceUnit = inputUnit ?? DEFAULT_ALGO_UNITS[algorithm] ?? pricingUnit;
-  const pricedHashrate = convertHashrateUnits(hashrate, sourceUnit, pricingUnit);
+  const pricedRigs = rigs.filter((r) => {
+    const price = r.price?.BTC?.price;
+    const advertisedHashrate = r.hashrate?.advertised?.hash;
+    return (
+      Number.isFinite(price) &&
+      price > 0 &&
+      Number.isFinite(advertisedHashrate) &&
+      advertisedHashrate > 0
+    );
+  });
+
+  if (!pricedRigs.length) {
+    throw new Error(`No priced rigs available for algorithm: ${algorithm}`);
+  }
+
+  const sourceUnit = inputUnit ?? DEFAULT_ALGO_UNITS[algorithm] ?? '';
   const durationDays  = durationHours / 24;
-  const mrrCostBtc    = mrrRatePerHashPerDay * pricedHashrate * durationDays;
+
+  const rigUnits = [...new Set(
+    pricedRigs
+      .map(r => r.hashrate?.advertised?.type)
+      .filter((unit): unit is string => typeof unit === 'string' && unit.trim().length > 0),
+  )];
+
+  let bestRigSelectionCostBtc: number | null = null;
+  for (const rigUnit of rigUnits) {
+    const requiredHashrate = convertHashrateUnits(hashrate, sourceUnit, rigUnit);
+    if (!Number.isFinite(requiredHashrate) || requiredHashrate <= 0) continue;
+
+    const selected = selectRigsForHashrate(pricedRigs, requiredHashrate, rigUnit);
+    if (!selected || selected.length === 0) continue;
+
+    const selectionCostBtc = selected.reduce((sum, rig) => sum + rig.price.BTC.price, 0) * durationDays;
+    if (!Number.isFinite(selectionCostBtc) || selectionCostBtc <= 0) continue;
+
+    if (bestRigSelectionCostBtc === null || selectionCostBtc < bestRigSelectionCostBtc) {
+      bestRigSelectionCostBtc = selectionCostBtc;
+    }
+  }
+
+  if (bestRigSelectionCostBtc === null) {
+    throw new Error(`No rig combination can satisfy hashrate for algorithm: ${algorithm}`);
+  }
+
+  mrrCostBtc = bestRigSelectionCostBtc;
   const mrrCostUsd    = mrrCostBtc * btcUsdRate;
-  const totalUsd      = +(mrrCostUsd * MARKUP_MULTIPLIER + feeUsd).toFixed(2);
+  // Final customer price includes:
+  // - 13% internal markup for dev/ops costs (intentionally not surfaced as a line item)
+  // - fixed Miner4 service fee
+  const totalUsd      = computeCustomerTotalUsd(mrrCostUsd, feeUsd);
 
   return {
     totalUsd,
@@ -160,6 +174,6 @@ export async function computePrice(
     btcUsdRate: +btcUsdRate.toFixed(2),
     availableRigs,
     keysConfigured: true,
-    source,
+    source: 'rigs',
   };
 }

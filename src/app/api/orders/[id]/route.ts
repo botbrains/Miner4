@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { ORDER_STATUSES } from '@/types';
 import { isAdminAuthorized } from '@/lib/adminAuth';
+import { DEFAULT_ALGO_UNITS } from '@/lib/pricing';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +26,12 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true, data: order });
+    const orderWithDisplayUnit = {
+      ...(order as Record<string, unknown>),
+      unit: DEFAULT_ALGO_UNITS[(order as { algorithm?: string }).algorithm ?? ''] ?? (order as { unit?: string }).unit,
+    };
+
+    return NextResponse.json({ success: true, data: orderWithDisplayUnit });
   } catch (err) {
     console.error('[orders/id] GET error:', err);
     return NextResponse.json({ success: false, error: 'Failed to fetch order' }, { status: 500 });
@@ -73,7 +79,14 @@ export async function PATCH(
       WHERE o.id = ?
     `).get(id);
 
-    return NextResponse.json({ success: true, data: order });
+    const orderWithDisplayUnit = order
+      ? {
+          ...(order as Record<string, unknown>),
+          unit: DEFAULT_ALGO_UNITS[(order as { algorithm?: string }).algorithm ?? ''] ?? (order as { unit?: string }).unit,
+        }
+      : order;
+
+    return NextResponse.json({ success: true, data: orderWithDisplayUnit });
   } catch (err) {
     console.error('[orders/id] PATCH error:', err);
     return NextResponse.json({ success: false, error: 'Failed to update order' }, { status: 500 });

@@ -13,7 +13,7 @@ export interface PricingResult {
   availableRigs: number;
   keysConfigured: boolean;
   /** Which pricing path was used. */
-  source: 'rigs' | 'unconfigured';
+  source: 'rigs' | 'unconfigured' | 'algo-suggested';
 }
 
 export async function GET(req: Request) {

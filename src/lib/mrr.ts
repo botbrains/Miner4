@@ -26,9 +26,28 @@ const MRR_ALGO_NAME_MAP: Record<string, string> = {
   'RandomX':  'randomx',
 };
 
+/**
+ * Compatibility aliases for algorithms whose MRR identifier may vary.
+ * Ethash rigs are often listed under "etchash" after the ETH PoS merge.
+ */
+const MRR_ALGO_QUERY_ALIASES: Record<string, string[]> = {
+  ethash: ['ethash', 'etchash'],
+  etchash: ['etchash', 'ethash'],
+};
+
 /** Convert an internal algorithm name to the MRR API type name. */
 export function toMrrAlgoName(algorithm: string): string {
   return MRR_ALGO_NAME_MAP[algorithm] ?? algorithm.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Return ordered candidate algorithm names for MRR queries.
+ * The first entry is always the canonical conversion of `algorithm`.
+ */
+function getMrrAlgoCandidates(algorithm: string): string[] {
+  const normalized = toMrrAlgoName(algorithm);
+  const aliases = MRR_ALGO_QUERY_ALIASES[normalized] ?? [normalized];
+  return [...new Set(aliases)];
 }
 
 /** Safe numeric parser — handles both number and string values from the MRR API. */
@@ -131,10 +150,17 @@ function normalizeRig(raw: RawMrrRig): MrrRig {
 /** Fetch available rigs for a given algorithm. */
 export async function getAvailableRigs(algorithm: string): Promise<MrrRig[]> {
   type Response = { success: boolean; data: { records: RawMrrRig[] } };
-  // MRR API v2 expects lowercase algorithm names (e.g. 'sha256', not 'SHA-256')
-  const mrrAlgo = toMrrAlgoName(algorithm);
-  const res = await mrrRequest<Response>('GET', `/rig?type=${encodeURIComponent(mrrAlgo)}&status=available`);
-  return (res.data?.records ?? []).map(normalizeRig);
+  // MRR API v2 expects lowercase algorithm names (e.g. 'sha256', not 'SHA-256').
+  // Some algorithms have historical aliases (e.g. ethash/etchash), so try each.
+  const candidates = getMrrAlgoCandidates(algorithm);
+
+  for (const mrrAlgo of candidates) {
+    const res = await mrrRequest<Response>('GET', `/rig?type=${encodeURIComponent(mrrAlgo)}&status=available`);
+    const records = (res.data?.records ?? []).map(normalizeRig);
+    if (records.length > 0) return records;
+  }
+
+  return [];
 }
 
 export interface RentalResult {
@@ -527,7 +553,7 @@ export async function getAlgoInfoList(): Promise<MrrAlgoInfo[]> {
  * the request fails (so callers can fall back to rig-based pricing).
  */
 export async function getAlgoSuggestedPrice(algorithm: string): Promise<MrrAlgoSuggestedPrice | null> {
-  const mrrAlgo = toMrrAlgoName(algorithm);
+  const candidates = getMrrAlgoCandidates(algorithm);
 
   type AlgoEntry = {
     name: string;
@@ -548,31 +574,35 @@ export async function getAlgoSuggestedPrice(algorithm: string): Promise<MrrAlgoS
   try {
     // Preferred endpoint for authoritative per-algo stats:
     // GET /info/algos/[NAME]
-    const res = await mrrRequest<AlgoResponse>('GET', `/info/algos/${encodeURIComponent(mrrAlgo)}`);
-    if (!res.success) return null;
+    for (const mrrAlgo of candidates) {
+      const res = await mrrRequest<AlgoResponse>('GET', `/info/algos/${encodeURIComponent(mrrAlgo)}`);
+      if (!res.success) continue;
 
-    const data = res.data;
-    const entry = Array.isArray(data)
-      ? data.find(a => a.name === mrrAlgo)
-      : ('record' in (data as { record?: AlgoEntry })
-        ? (data as { record?: AlgoEntry }).record
-        : ('records' in (data as { records?: AlgoEntry[] })
-          ? (data as { records?: AlgoEntry[] }).records?.find(a => a.name === mrrAlgo)
-          : (data as AlgoEntry)));
-    if (!entry?.suggested_price) return null;
+      const data = res.data;
+      const entry = Array.isArray(data)
+        ? data.find(a => a.name === mrrAlgo)
+        : ('record' in (data as { record?: AlgoEntry })
+          ? (data as { record?: AlgoEntry }).record
+          : ('records' in (data as { records?: AlgoEntry[] })
+            ? (data as { records?: AlgoEntry[] }).records?.find(a => a.name === mrrAlgo)
+            : (data as AlgoEntry)));
+      if (!entry?.suggested_price) continue;
 
-    const amount            = parseNum(entry.suggested_price.amount);
-    const unit              = entry.suggested_price.unit ?? '';
-    const currentRentedHash = parseNum(entry.current_rented_hash);
+      const amount            = parseNum(entry.suggested_price.amount);
+      const unit              = entry.suggested_price.unit ?? '';
+      const currentRentedHash = parseNum(entry.current_rented_hash);
 
-    if (!Number.isFinite(amount) || amount <= 0) return null;
+      if (!Number.isFinite(amount) || amount <= 0) continue;
 
-    return {
-      name: mrrAlgo,
-      btcPerUnitPerDay: amount,
-      unit,
-      ...(Number.isFinite(currentRentedHash) ? { currentRentedHash } : {}),
-    };
+      return {
+        name: mrrAlgo,
+        btcPerUnitPerDay: amount,
+        unit,
+        ...(Number.isFinite(currentRentedHash) ? { currentRentedHash } : {}),
+      };
+    }
+
+    return null;
   } catch {
     // Non-fatal: caller should fall back to rig-based pricing
     return null;
